@@ -1,0 +1,6 @@
+{
+  "name": "DOF Düzeltici Önleyici Faaliyet Sistemi",
+  "description": "Mobil uyumlu, QR destekli ve Gemini AI destekli Düzeltici Önleyici Faaliyet (DOF) bildirim ve takip sistemi.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

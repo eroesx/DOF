@@ -1,0 +1,256 @@
+{
+  "entities": {
+    "DofForm": {
+      "title": "DofForm",
+      "description": "Düzeltici Önleyici Faaliyet Formu verisi",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Firestore doküman kimliği"
+        },
+        "refNo": {
+          "type": "string",
+          "description": "Benzersiz takip numarası (Örn: DOF-12345)"
+        },
+        "type": {
+          "type": "string",
+          "enum": ["düzeltici", "önleyici"],
+          "description": "Faaliyet türü"
+        },
+        "title": {
+          "type": "string",
+          "description": "Faaliyet başlığı / konusu"
+        },
+        "department": {
+          "type": "string",
+          "description": "İlgili bölüm veya birim"
+        },
+        "reporterName": {
+          "type": "string",
+          "description": "Bildirimi yapan kişinin adı soyadı"
+        },
+        "reporterContact": {
+          "type": "string",
+          "description": "Bildirimi yapan kişinin iletişim bilgisi (e-posta veya telefon)"
+        },
+        "description": {
+          "type": "string",
+          "description": "Tespit edilen uygunsuzluk veya durum açıklaması"
+        },
+        "proposedAction": {
+          "type": "string",
+          "description": "Önerilen düzeltici veya önleyici faaliyet açıklaması"
+        },
+        "imageUrl": {
+          "type": "string",
+          "description": "Eklenen fotoğrafın Base64 veri URL'si veya URL adresi"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["yeni", "inceleniyor", "cozuldu", "reddedildi"],
+          "description": "Talebin güncel durumu"
+        },
+        "adminFeedback": {
+          "type": "string",
+          "description": "Yöneticinin geri bildirimi veya aksiyon planı açıklaması"
+        },
+        "assignedUserId": {
+          "type": "string",
+          "description": "Havale edilen kullanıcının ID'si"
+        },
+        "assignedUserName": {
+          "type": "string",
+          "description": "Havale edilen kullanıcının adı soyadı"
+        },
+        "assignedUserEmail": {
+          "type": "string",
+          "description": "Havale edilen kullanıcının e-posta adresi"
+        },
+        "referralStatus": {
+          "type": "string",
+          "enum": ["beklemede", "islem_devam_ediyor", "yapildi", "iptal"],
+          "description": "Havale işlem aşaması durumu"
+        },
+        "referralNote": {
+          "type": "string",
+          "description": "Yönetici havale talimatı veya notu"
+        },
+        "referralResultNote": {
+          "type": "string",
+          "description": "Yapılan işlemler veya sonuç açıklaması"
+        },
+        "referralUpdatedAt": {
+          "type": "string",
+          "description": "Havale işleminin son güncellenme tarihi"
+        },
+        "riskLevel": {
+          "type": "string",
+          "enum": ["Düşük", "Orta", "Yüksek"],
+          "description": "Talep risk derecesi"
+        },
+        "targetCompletionDate": {
+          "type": "string",
+          "description": "Hedef tamamlanma tarihi"
+        },
+        "completionDays": {
+          "type": "integer",
+          "description": "Tamamlanma gün süresi"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Oluşturulma tarihi"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Son güncelleme tarihi"
+        }
+      },
+      "required": ["refNo", "type", "title", "department", "reporterName", "reporterContact", "description", "status", "createdAt", "updatedAt"]
+    },
+    "PanelUser": {
+      "title": "PanelUser",
+      "description": "Yönetim panelini kullanmaya yetkili kişilerin listesi",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Firestore doküman kimliği"
+        },
+        "email": {
+          "type": "string",
+          "description": "Kullanıcının yetkili e-posta adresi (Örn: ad.soyad@firma.com)"
+        },
+        "name": {
+          "type": "string",
+          "description": "Kullanıcının adı soyadı"
+        },
+        "role": {
+          "type": "string",
+          "enum": ["admin", "editor", "viewer"],
+          "description": "Kullanıcı rolü (Yönetici, Editör veya İzleyici)"
+        },
+        "password": {
+          "type": "string",
+          "description": "Kullanıcının panel giriş şifresi / parolası"
+        },
+        "department": {
+          "type": "string",
+          "description": "Kullanıcının görevli olduğu bölüm veya departman"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Eklenme tarihi"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Son güncellenme tarihi"
+        }
+      },
+      "required": ["email", "name", "role", "createdAt", "updatedAt"]
+    },
+    "EmailLog": {
+      "title": "EmailLog",
+      "description": "Gönderilen otomatik e-posta bildirim günlüklüğü",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "E-posta kayıt kimliği"
+        },
+        "to": {
+          "type": "string",
+          "description": "Alıcı e-posta adresi"
+        },
+        "refNo": {
+          "type": "string",
+          "description": "İlgili DÖF referans numarası"
+        },
+        "type": {
+          "type": "string",
+          "enum": ["yeni_dof", "durum_guncelleme"],
+          "description": "Bildirim türü"
+        },
+        "subject": {
+          "type": "string",
+          "description": "E-posta konu başlığı"
+        },
+        "html": {
+          "type": "string",
+          "description": "HTML e-posta içeriği"
+        },
+        "sentAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Gönderim tarihi"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["queued", "sent"],
+          "description": "Gönderim durumu"
+        }
+      },
+      "required": ["to", "refNo", "type", "subject", "html", "sentAt", "status"]
+    },
+    "Department": {
+      "title": "Department",
+      "description": "Sistem departman ve birim tanımlaması",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Firestore doküman kimliği"
+        },
+        "name": {
+          "type": "string",
+          "description": "Departman adı"
+        },
+        "responsibleEmail": {
+          "type": "string",
+          "description": "Departman sorumlusunun e-posta adresi"
+        },
+        "responsibleName": {
+          "type": "string",
+          "description": "Departman sorumlusunun adı"
+        },
+        "isCustomQr": {
+          "type": "boolean",
+          "description": "Özel QR kodu aktif mi"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Eklenme tarihi"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Son güncellenme tarihi"
+        }
+      },
+      "required": ["name"]
+    }
+  },
+  "firestore": {
+    "dofs/{dofId}": {
+      "schema": "DofForm",
+      "description": "Tüm düzeltici ve önleyici faaliyet (DOF) bildirimleri"
+    },
+    "panel_users/{userId}": {
+      "schema": "PanelUser",
+      "description": "Yönetim paneline erişim izni olan yetkili kullanıcılar listesi"
+    },
+    "email_logs/{logId}": {
+      "schema": "EmailLog",
+      "description": "Sistem tarafından tetiklenen otomatik e-posta bildirim günlükleri"
+    },
+    "departments/{deptId}": {
+      "schema": "Department",
+      "description": "Sistem bünyesindeki tüm departmanlar ve sorumlular"
+    }
+  }
+}

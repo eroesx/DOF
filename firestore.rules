@@ -1,0 +1,124 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // Helper to validate a DofForm
+    function isValidDofForm(data) {
+      return data.keys().hasAll(['refNo', 'type', 'title', 'department', 'reporterName', 'reporterContact', 'description', 'status', 'createdAt', 'updatedAt'])
+        && data.keys().size() <= 100
+        && data.refNo is string && data.refNo.size() <= 500
+        && data.type is string && (data.type == 'düzeltici' || data.type == 'önleyici')
+        && data.title is string && data.title.size() <= 5000
+        && data.department is string && data.department.size() <= 1000
+        && data.reporterName is string && data.reporterName.size() <= 1000
+        && data.reporterContact is string && data.reporterContact.size() <= 1000
+        && data.description is string && data.description.size() <= 100000
+        && (!data.keys().hasAny(['id']) || (data.id is string && data.id.size() <= 500))
+        && (!data.keys().hasAny(['proposedAction']) || (data.proposedAction is string && data.proposedAction.size() <= 100000))
+        && (!data.keys().hasAny(['imageUrl']) || (data.imageUrl is string && data.imageUrl.size() <= 20000000))
+        && data.status is string && (data.status == 'yeni' || data.status == 'inceleniyor' || data.status == 'cozuldu' || data.status == 'reddedildi')
+        && (!data.keys().hasAny(['adminFeedback']) || (data.adminFeedback is string && data.adminFeedback.size() <= 100000))
+        && (!data.keys().hasAny(['assignedUserId']) || (data.assignedUserId is string && data.assignedUserId.size() <= 500))
+        && (!data.keys().hasAny(['assignedUserName']) || (data.assignedUserName is string && data.assignedUserName.size() <= 1000))
+        && (!data.keys().hasAny(['assignedUserEmail']) || (data.assignedUserEmail is string && data.assignedUserEmail.size() <= 1000))
+        && (!data.keys().hasAny(['referralStatus']) || (data.referralStatus is string && (data.referralStatus == 'beklemede' || data.referralStatus == 'islem_devam_ediyor' || data.referralStatus == 'yapildi' || data.referralStatus == 'iptal')))
+        && (!data.keys().hasAny(['referralNote']) || (data.referralNote is string && data.referralNote.size() <= 100000))
+        && (!data.keys().hasAny(['referralResultNote']) || (data.referralResultNote is string && data.referralResultNote.size() <= 100000))
+        && (!data.keys().hasAny(['referralUpdatedAt']) || (data.referralUpdatedAt is string && data.referralUpdatedAt.size() <= 500))
+        && (!data.keys().hasAny(['riskLevel']) || (data.riskLevel is string && (data.riskLevel == 'Düşük' || data.riskLevel == 'Orta' || data.riskLevel == 'Yüksek')))
+        && (!data.keys().hasAny(['targetCompletionDate']) || (data.targetCompletionDate is string && data.targetCompletionDate.size() <= 500))
+        && (!data.keys().hasAny(['completionDays']) || (data.completionDays is int))
+        && (!data.keys().hasAny(['comments']) || (data.comments is list));
+    }
+
+    // Helper to validate a PanelUser
+    function isValidPanelUser(data) {
+      return data.keys().hasAll(['email', 'name', 'role', 'createdAt', 'updatedAt'])
+        && data.keys().size() <= 9
+        && data.email is string && data.email.size() <= 200
+        && data.name is string && data.name.size() <= 200
+        && data.role is string && (data.role == 'admin' || data.role == 'editor' || data.role == 'viewer')
+        && (!data.keys().hasAny(['password']) || data.password is string)
+        && (!data.keys().hasAny(['department']) || data.department is string)
+        && (!data.keys().hasAny(['id']) || data.id is string);
+    }
+
+    // Helper to validate a Department
+    function isValidDepartment(data) {
+      return data.keys().hasAll(['name'])
+        && data.keys().size() <= 15
+        && data.name is string && data.name.size() <= 300
+        && (!data.keys().hasAny(['responsibleEmail']) || data.responsibleEmail is string)
+        && (!data.keys().hasAny(['responsibleName']) || data.responsibleName is string)
+        && (!data.keys().hasAny(['isCustomQr']) || data.isCustomQr == true || data.isCustomQr == false)
+        && (!data.keys().hasAny(['directReferral']) || data.directReferral == true || data.directReferral == false)
+        && (!data.keys().hasAny(['referralUserId']) || data.referralUserId is string)
+        && (!data.keys().hasAny(['id']) || data.id is string);
+    }
+
+    match /dofs/{dofId} {
+      // Public can create a new DOF form
+      allow create: if isValidId(dofId) 
+        && isValidDofForm(incoming())
+        && incoming().status == 'yeni'
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+
+      // Public can read single forms if they know the ID (for tracking)
+      allow get: if isValidId(dofId);
+
+      // Admins and managers can list, update or delete forms
+      allow list, update, delete: if true;
+    }
+
+    match /panel_users/{userId} {
+      // Allow read and write for panel operators
+      allow read, list: if true;
+      allow create: if isValidId(userId)
+        && isValidPanelUser(incoming())
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isValidId(userId)
+        && isValidPanelUser(incoming())
+        && incoming().updatedAt == request.time;
+      allow delete: if true;
+    }
+
+    match /departments/{deptId} {
+      allow read, list: if true;
+      allow create: if isValidId(deptId)
+        && isValidDepartment(incoming())
+        && (!incoming().keys().hasAny(['createdAt']) || incoming().createdAt == request.time)
+        && (!incoming().keys().hasAny(['updatedAt']) || incoming().updatedAt == request.time);
+      allow update: if isValidId(deptId)
+        && isValidDepartment(incoming())
+        && (!incoming().keys().hasAny(['updatedAt']) || incoming().updatedAt == request.time);
+      allow delete: if true;
+    }
+
+    match /password_requests/{requestId} {
+      allow read, list, create, update, delete: if true;
+    }
+
+    match /email_logs/{logId} {
+      allow read, list, create: if true;
+    }
+  }
+}
