@@ -348,6 +348,18 @@ Lütfen yanıtı kesinlikle geçerli bir JSON formatında döndür. JSON yapıs�
   }
 });
 
+// Endpoint to download pre-compiled production dist zip for Netlify deployment
+app.get("/api/download-dist-zip", (req, res) => {
+  const zipPath = path.join(process.cwd(), "ttkdof_dist.zip");
+  if (fs.existsSync(zipPath)) {
+    res.setHeader("Content-Disposition", "attachment; filename=ttkdof-production-dist.zip");
+    res.setHeader("Content-Type", "application/zip");
+    res.sendFile(zipPath);
+  } else {
+    res.status(404).send("Zip file not found");
+  }
+});
+
 // Configure Vite middleware or static files depending on environment
 async function setupViteOrStatic() {
   if (process.env.NODE_ENV !== "production") {

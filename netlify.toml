@@ -1,0 +1,13 @@
+# Netlify Configuration for TTK DÖF Yönetim Sistemi
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+[build.environment]
+  NODE_VERSION = "20"
+
+# SPA Fallback: Tüm yönlendirmeleri index.html'e yönlendirir (404 hatasını önler)
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
