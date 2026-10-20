@@ -27,10 +27,16 @@ import {
   UserPlus,
   Plus,
   Shield,
+  ShieldCheck,
+  Wrench,
+  Menu,
+  Pin,
+  PinOff,
   Edit3,
   Volume2,
   VolumeX,
   ChevronDown,
+  ChevronRight,
   ArrowUp,
   ArrowDown,
   X,
@@ -47,7 +53,14 @@ import {
   Paperclip,
   MessageSquare,
   Camera,
-  Smartphone
+  Smartphone,
+  Image as ImageIcon,
+  Folder,
+  FolderKanban,
+  FolderPlus,
+  FolderCheck,
+  CheckSquare,
+  Square
 } from "lucide-react";
 import { DofSingleQrModal } from "./DofSingleQrModal";
 import { DofQrScannerModal, ScanResult } from "./DofQrScannerModal";
@@ -65,6 +78,9 @@ import {
   updatePanelUser,
   deletePanelUser,
   listEmailLogs,
+  listFolders,
+  moveDofsToFolder,
+  removeDofsFromFolder,
   handleFirestoreError,
   OperationType
 } from "../lib/db";
@@ -75,7 +91,8 @@ import {
   GeminiAnalysisResult,
   PanelUser,
   PanelUserRole,
-  Department
+  Department,
+  DofFolder
 } from "../types";
 import { DofPieChart } from "./DofPieChart";
 import { DofDeptChart } from "./DofDeptChart";
@@ -86,6 +103,17 @@ import { DofMonthlyDistributionChart } from "./DofMonthlyDistributionChart";
 import DofSubmitForm from "./DofSubmitForm";
 import { DofDeadlineSummaryChart } from "./DofDeadlineSummaryChart";
 import { DashboardChartsGrid } from "./DashboardChartsGrid";
+import DofLandscapePrintModal from "./DofLandscapePrintModal";
+import DofExecutiveSummaryCard from "./DofExecutiveSummaryCard";
+import DofFolderManager from "./DofFolderManager";
+import { compressImageToBase64 } from "../utils/imageCompressor";
+import {
+  computeTargetCompletionDate,
+  getStoredSettings,
+  syncSettingsFromFirestore,
+  saveSystemSettings,
+  getRemainingBusinessDays
+} from "../lib/settings";
 
 /**
  * Birim bazlı yetkilendirme kontrol fonksiyonu:
@@ -196,16 +224,35 @@ export default function DofAdmin() {
   const [isCopied, setIsCopied] = useState(false);
 
   // Admin View Sub-Tab
-  const [adminSubTab, setAdminSubTab] = useState<"dashboard" | "dofs" | "new_dof" | "users" | "departments" | "workflow" | "reports" | "logs" | "remote">(() => {
+  const [adminSubTab, setAdminSubTab] = useState<"dashboard" | "dofs" | "folders" | "new_dof" | "users" | "departments" | "workflow" | "reports" | "logs" | "remote">(() => {
     const saved = localStorage.getItem("dof_admin_default_tab_setting");
-    if (saved && ["dashboard", "dofs", "new_dof", "users", "departments", "workflow", "reports", "logs", "remote"].includes(saved)) {
+    if (saved && ["dashboard", "dofs", "folders", "new_dof", "users", "departments", "workflow", "reports", "logs", "remote"].includes(saved)) {
       return saved as any;
     }
     return "dashboard";
   });
 
+  // Folders State (dof_folders)
+  const [folders, setFolders] = useState<DofFolder[]>([]);
+  const [isFoldersLoading, setIsFoldersLoading] = useState(false);
+  const [folderFilter, setFolderFilter] = useState<string>("all");
+  const [selectedDofIds, setSelectedDofIds] = useState<string[]>([]);
+  const [bulkTargetFolderId, setBulkTargetFolderId] = useState<string>("");
+  const [isBulkMoving, setIsBulkMoving] = useState(false);
+  const [selectedFolderForClose, setSelectedFolderForClose] = useState<string>("");
+
   // Panel Authorization Check
   const [isAuthorized, setIsAuthorized] = useState<boolean | null>(null);
+
+  // Sol Menü (Sidebar) Otomatik Gizleme & Hover Durumları
+  const [isSidebarHovered, setIsSidebarHovered] = useState(false);
+  const [isSidebarPinned, setIsSidebarPinned] = useState<boolean>(() => {
+    return localStorage.getItem("dof_admin_sidebar_pinned") === "true";
+  });
+  const [sidebarDisplayMode, setSidebarDisplayMode] = useState<"rail" | "hidden">(() => {
+    return (localStorage.getItem("dof_admin_sidebar_display_mode") as any) || "hidden";
+  });
+  const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
 
   // Departments management states
   const [departments, setDepartments] = useState<Department[]>([]);
@@ -376,6 +423,12 @@ export default function DofAdmin() {
   const [step2CompletionDays, setStep2CompletionDays] = useState<number | string>("");
   const [step2RootCauses, setStep2RootCauses] = useState<string[]>(["", "", "", "", ""]);
   const [step3ProgressUpdate, setStep3ProgressUpdate] = useState("");
+  const [step3BeforeImage, setStep3BeforeImage] = useState<string>("");
+  const [step3AfterImage, setStep3AfterImage] = useState<string>("");
+  const [isPhotoSaving, setIsPhotoSaving] = useState(false);
+  const [isCompressingPhoto, setIsCompressingPhoto] = useState(false);
+  const [showLandscapeModal, setShowLandscapeModal] = useState(false);
+  const [landscapeTargetDof, setLandscapeTargetDof] = useState<DofForm | null>(null);
   const [commentText, setCommentText] = useState("");
   const [isCommentSending, setIsCommentSending] = useState(false);
 
@@ -389,6 +442,14 @@ export default function DofAdmin() {
   
   // Program Parametre Ayarları States
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [preventiveDaysSetting, setPreventiveDaysSetting] = useState<number>(() => {
+    const val = Number(localStorage.getItem("dof_admin_preventive_days"));
+    return !isNaN(val) && val > 0 ? val : 7;
+  });
+  const [correctiveDaysSetting, setCorrectiveDaysSetting] = useState<number>(() => {
+    const val = Number(localStorage.getItem("dof_admin_corrective_days"));
+    return !isNaN(val) && val > 0 ? val : 3;
+  });
   const [defaultSoundSetting, setDefaultSoundSetting] = useState<"on" | "off" | "last" | string>(() => {
     return localStorage.getItem("dof_admin_default_sound_setting") || "on";
   });
@@ -465,11 +526,31 @@ export default function DofAdmin() {
   // Monitor auth state change
   useEffect(() => {
     fetchAllUsers();
+    
+    // Sync settings from Firestore
+    syncSettingsFromFirestore().then((s) => {
+      setPreventiveDaysSetting(s.preventiveActionDays);
+      setCorrectiveDaysSetting(s.correctiveActionDays);
+      if (s.defaultSoundSetting) setDefaultSoundSetting(s.defaultSoundSetting);
+      if (s.defaultTabSetting) setDefaultTabSetting(s.defaultTabSetting);
+      if (s.defaultStatusFilterSetting) setDefaultStatusFilterSetting(s.defaultStatusFilterSetting);
+      if (s.defaultNotificationSetting) setDefaultNotificationSetting(s.defaultNotificationSetting);
+      setIsPasscodeLoginPassive(s.isPasscodeLoginPassive);
+    });
+
+    const handleOpenSettingsEvent = () => {
+      setIsSettingsOpen(true);
+    };
+    window.addEventListener("dof_open_settings", handleOpenSettingsEvent);
+
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
       setAuthChecked(true);
     });
-    return () => unsubscribe();
+    return () => {
+      unsubscribe();
+      window.removeEventListener("dof_open_settings", handleOpenSettingsEvent);
+    };
   }, []);
 
   // Redirect to dashboard or fallback if current user doesn't have privileges
@@ -659,6 +740,27 @@ export default function DofAdmin() {
       setPasswordRequests(list);
     }, (error) => {
       console.error("Error subscribing to password requests:", error);
+    });
+
+    return () => unsubscribe();
+  }, [isAuthorized]);
+
+  // Real-time listener for dof_folders (Klasörler)
+  useEffect(() => {
+    if (!isAuthorized) return;
+
+    setIsFoldersLoading(true);
+    const q = query(collection(db, "dof_folders"), orderBy("createdAt", "desc"));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const list: DofFolder[] = [];
+      snapshot.forEach((doc) => {
+        list.push({ id: doc.id, ...doc.data() } as DofFolder);
+      });
+      setFolders(list);
+      setIsFoldersLoading(false);
+    }, (error) => {
+      console.warn("dof_folders dinleme uyarısı (kritik değil):", error);
+      setIsFoldersLoading(false);
     });
 
     return () => unsubscribe();
@@ -1315,7 +1417,11 @@ export default function DofAdmin() {
       }
     }
 
-    return matchesSearch && matchesStatus && matchesType && matchesDept && matchesReferral && matchesDate;
+    const matchesFolder = 
+      folderFilter === "all" ||
+      (folderFilter === "unassigned" ? !dof.folderId : dof.folderId === folderFilter);
+
+    return matchesSearch && matchesStatus && matchesType && matchesDept && matchesReferral && matchesDate && matchesFolder;
   });
 
   // Stats calculation
@@ -1324,6 +1430,10 @@ export default function DofAdmin() {
   const reviewCount = visibleDofs.filter((d) => d.status === "inceleniyor").length;
   const resolvedCount = visibleDofs.filter((d) => d.status === "cozuldu").length;
   const rejectedCount = visibleDofs.filter((d) => d.status === "reddedildi").length;
+  const openCount = visibleDofs.filter((d) => d.status === "yeni" || d.status === "inceleniyor").length;
+  const closedCount = visibleDofs.filter((d) => d.status === "cozuldu" || d.status === "reddedildi").length;
+  const correctiveCount = visibleDofs.filter((d) => d.type === "düzeltici").length;
+  const preventiveCount = visibleDofs.filter((d) => d.type === "önleyici").length;
   const myTasksCount = visibleDofs.filter((d) => 
     d.assignedUserId === activePanelUser?.id ||
     (d.assignedUserEmail && activePanelUser?.email && d.assignedUserEmail.toLowerCase().trim() === activePanelUser.email.toLowerCase().trim())
@@ -1648,19 +1758,24 @@ export default function DofAdmin() {
 
       // Initialize workflow step states
       setStep1RiskLevel(dof.riskLevel || "Orta");
-      setStep1TargetDate(dof.targetCompletionDate || "");
+      const defaultTargetDate = dof.targetCompletionDate || computeTargetCompletionDate(dof.createdAt, dof.type);
+      setStep1TargetDate(defaultTargetDate);
       setStep1AssigneeId(dof.assignedUserId || "");
       setStep1ReferralNote(dof.referralNote || "");
       
       setStep2RiskLevel(dof.riskLevel || "Orta");
       setStep2ForwardAssigneeId("");
       setStep2ResultNote(dof.referralResultNote || "");
-      setStep2CompletionDays(dof.completionDays || "");
+      const defaultDays = dof.completionDays || (dof.type === "önleyici" ? preventiveDaysSetting : correctiveDaysSetting);
+      setStep2CompletionDays(defaultDays);
       const rc = dof.rootCauses && Array.isArray(dof.rootCauses)
         ? [dof.rootCauses[0] || "", dof.rootCauses[1] || "", dof.rootCauses[2] || "", dof.rootCauses[3] || "", dof.rootCauses[4] || ""]
         : ["", "", "", "", ""];
       setStep2RootCauses(rc);
       setStep3ProgressUpdate("");
+      setStep3BeforeImage(dof.beforeImageUrl || dof.imageUrl || "");
+      setStep3AfterImage(dof.afterImageUrl || "");
+      setSelectedFolderForClose(dof.folderId || "");
 
       // Determine default active step in the guide
       if (dof.status === "cozuldu" || dof.status === "reddedildi") {
@@ -1683,7 +1798,120 @@ export default function DofAdmin() {
       setAiError(null);
       setSaveSuccess(false);
       setStep2RootCauses(["", "", "", "", ""]);
+      setStep3BeforeImage("");
+      setStep3AfterImage("");
+      setSelectedFolderForClose("");
       setActiveGuideStep(1);
+    }
+  };
+
+  const handleAssignDofFolder = async (dofId: string, targetFolderId: string) => {
+    try {
+      const targetFolder = folders.find(f => f.id === targetFolderId);
+      const targetFolderName = targetFolder ? targetFolder.name : "";
+      await moveDofsToFolder([dofId], targetFolderId, targetFolderName);
+      
+      setDofs(prev => prev.map(d => d.id === dofId ? { ...d, folderId: targetFolderId, folderName: targetFolderName } : d));
+      if (selectedDof?.id === dofId) {
+        setSelectedDof(prev => prev ? { ...prev, folderId: targetFolderId, folderName: targetFolderName } : null);
+        setSelectedFolderForClose(targetFolderId);
+      }
+      setWorkflowNotice(targetFolder ? `✓ DÖF "${targetFolder.name}" klasörüne taşındı.` : "✓ DÖF klasörden çıkarıldı.");
+      setTimeout(() => setWorkflowNotice(null), 3000);
+    } catch (err) {
+      console.error(err);
+      alert("Klasör atanırken bir hata oluştu.");
+    }
+  };
+
+  const handleToggleSelectAll = () => {
+    if (selectedDofIds.length === filteredDofs.length && filteredDofs.length > 0) {
+      setSelectedDofIds([]);
+    } else {
+      setSelectedDofIds(filteredDofs.map(d => d.id).filter(Boolean) as string[]);
+    }
+  };
+
+  const handleToggleSelectDof = (id: string) => {
+    setSelectedDofIds(prev => 
+      prev.includes(id) ? prev.filter(item => item !== id) : [...prev, id]
+    );
+  };
+
+  const handleBulkMoveToFolder = async (targetFolderId: string) => {
+    if (!targetFolderId || selectedDofIds.length === 0) return;
+    const targetFolder = folders.find(f => f.id === targetFolderId);
+    if (!targetFolder) return;
+
+    setIsBulkMoving(true);
+    try {
+      await moveDofsToFolder(selectedDofIds, targetFolder.id!, targetFolder.name);
+      setDofs(prev => prev.map(d => {
+        if (selectedDofIds.includes(d.id!)) {
+          return { ...d, folderId: targetFolder.id, folderName: targetFolder.name };
+        }
+        return d;
+      }));
+      setWorkflowNotice(`✓ ${selectedDofIds.length} adet DÖF "${targetFolder.name}" klasörüne başarıyla taşındı.`);
+      setSelectedDofIds([]);
+      setBulkTargetFolderId("");
+      setTimeout(() => setWorkflowNotice(null), 4000);
+    } catch (err) {
+      console.error(err);
+      alert("Toplu klasöre taşıma işlemi sırasında hata oluştu.");
+    } finally {
+      setIsBulkMoving(false);
+    }
+  };
+
+  const handleBulkRemoveFromFolder = async () => {
+    if (selectedDofIds.length === 0) return;
+    setIsBulkMoving(true);
+    try {
+      await removeDofsFromFolder(selectedDofIds);
+      setDofs(prev => prev.map(d => {
+        if (selectedDofIds.includes(d.id!)) {
+          return { ...d, folderId: "", folderName: "" };
+        }
+        return d;
+      }));
+      setWorkflowNotice(`✓ ${selectedDofIds.length} adet DÖF klasörden çıkarıldı.`);
+      setSelectedDofIds([]);
+      setTimeout(() => setWorkflowNotice(null), 4000);
+    } catch (err) {
+      console.error(err);
+      alert("Klasörden çıkarma işlemi sırasında hata oluştu.");
+    } finally {
+      setIsBulkMoving(false);
+    }
+  };
+
+  const handleMoveAllClosedToFolder = async (targetFolderId: string) => {
+    if (!targetFolderId) return;
+    const targetFolder = folders.find(f => f.id === targetFolderId);
+    if (!targetFolder) return;
+    const closedDofs = dofs.filter(d => (d.status === "cozuldu" || d.status === "reddedildi") && d.folderId !== targetFolderId);
+    if (closedDofs.length === 0) {
+      alert("Bu klasörde olmayan kapatılmış/çözülmüş DÖF kaydı bulunamadı.");
+      return;
+    }
+    const closedIds = closedDofs.map(d => d.id!).filter(Boolean);
+    setIsBulkMoving(true);
+    try {
+      await moveDofsToFolder(closedIds, targetFolder.id!, targetFolder.name);
+      setDofs(prev => prev.map(d => {
+        if (closedIds.includes(d.id!)) {
+          return { ...d, folderId: targetFolder.id, folderName: targetFolder.name };
+        }
+        return d;
+      }));
+      setWorkflowNotice(`✓ Kapatılan ${closedIds.length} adet DÖF "${targetFolder.name}" klasörüne başarıyla taşındı.`);
+      setTimeout(() => setWorkflowNotice(null), 4000);
+    } catch (err) {
+      console.error(err);
+      alert("Kapatılan DÖF'ler klasöre taşınırken hata oluştu.");
+    } finally {
+      setIsBulkMoving(false);
     }
   };
 
@@ -1810,10 +2038,15 @@ export default function DofAdmin() {
         ? `${currentNote}\n\n[Uygulama Güncellemesi - ${new Date().toLocaleDateString("tr-TR")}]: ${step3ProgressUpdate.trim()}`
         : `[Uygulama Güncellemesi - ${new Date().toLocaleDateString("tr-TR")}]: ${step3ProgressUpdate.trim()}`;
 
-      const updates = {
+      const updates: any = {
         referralResultNote: updatedNote,
+        beforeImageUrl: step3BeforeImage || null,
+        afterImageUrl: step3AfterImage || null,
         referralUpdatedAt: new Date().toISOString(),
       };
+      if (step3BeforeImage && !selectedDof.imageUrl) {
+        updates.imageUrl = step3BeforeImage;
+      }
 
       await updateDof(selectedDof.id, updates);
       await fetchAllDofs();
@@ -1824,7 +2057,7 @@ export default function DofAdmin() {
       });
 
       setStep3ProgressUpdate("");
-      alert("Uygulama aşaması güncelleme notu başarıyla eklendi.");
+      alert("Uygulama aşaması güncelleme notu ve fotoğraflar başarıyla kaydedildi.");
     } catch (err) {
       console.error(err);
       alert("Uygulama notu kaydedilirken hata oluştu.");
@@ -1833,18 +2066,73 @@ export default function DofAdmin() {
     }
   };
 
+  const handleSaveStep3Photos = async () => {
+    if (!selectedDof?.id) return;
+    setIsPhotoSaving(true);
+    try {
+      const updates: any = {
+        beforeImageUrl: step3BeforeImage || null,
+        afterImageUrl: step3AfterImage || null,
+        referralUpdatedAt: new Date().toISOString(),
+      };
+      if (step3BeforeImage && !selectedDof.imageUrl) {
+        updates.imageUrl = step3BeforeImage;
+      }
+
+      await updateDof(selectedDof.id, updates);
+      await fetchAllDofs();
+
+      setSelectedDof({
+        ...selectedDof,
+        ...updates,
+      });
+
+      alert("Önce ve Sonra fotoğrafları başarıyla kaydedildi.");
+    } catch (err) {
+      console.error(err);
+      alert("Fotoğraflar kaydedilirken hata oluştu.");
+    } finally {
+      setIsPhotoSaving(false);
+    }
+  };
+
+  const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>, target: "before" | "after") => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setIsCompressingPhoto(true);
+    try {
+      const compressed = await compressImageToBase64(file, 900, 0.75);
+      if (target === "before") {
+        setStep3BeforeImage(compressed);
+      } else {
+        setStep3AfterImage(compressed);
+      }
+    } catch (err) {
+      console.error(err);
+      alert("Fotoğraf işlenirken hata oluştu.");
+    } finally {
+      setIsCompressingPhoto(false);
+      e.target.value = "";
+    }
+  };
+
   const handleWorkflowStep4Complete = async () => {
     if (!selectedDof?.id) return;
     setIsSaving(true);
     try {
       const nowIso = new Date().toISOString();
-      const updates = {
+      const targetFolderId = selectedFolderForClose || selectedDof.folderId || "";
+      const targetFolderName = targetFolderId ? (folders.find(f => f.id === targetFolderId)?.name || selectedDof.folderName || "") : "";
+
+      const updates: any = {
         status: "cozuldu" as const,
         referralStatus: "yapildi" as const,
         referralUpdatedAt: nowIso,
         currentStep: 8,
         adminFeedback: selectedDof.adminFeedback || editFeedback || "DÖF başarıyla tamamlandı ve süreç kapatıldı.",
         updatedAt: nowIso,
+        folderId: targetFolderId,
+        folderName: targetFolderName,
       };
 
       await updateDof(selectedDof.id, updates);
@@ -1860,7 +2148,8 @@ export default function DofAdmin() {
 
       setActiveGuideStep(5);
       setSaveSuccess(true);
-      setWorkflowNotice("✓ DÖF başarıyla tamamlandı olarak işaretlendi ve süreç kapatıldı.");
+      const folderNoticeMsg = targetFolderName ? ` ve "${targetFolderName}" klasörüne taşındı.` : ".";
+      setWorkflowNotice(`✓ DÖF başarıyla tamamlandı olarak işaretlendi${folderNoticeMsg}`);
       setTimeout(() => {
         setWorkflowNotice(null);
         setSaveSuccess(false);
@@ -1879,19 +2168,26 @@ export default function DofAdmin() {
     setSaveSuccess(false);
 
     try {
-      await updateDof(selectedDof.id, {
+      const targetFolderId = selectedFolderForClose !== undefined ? selectedFolderForClose : (selectedDof.folderId || "");
+      const targetFolderName = targetFolderId ? (folders.find(f => f.id === targetFolderId)?.name || "") : "";
+
+      const updates: any = {
         status: editStatus,
         adminFeedback: editFeedback,
-      });
+        folderId: targetFolderId,
+        folderName: targetFolderName,
+      };
+
+      await updateDof(selectedDof.id, updates);
       setSaveSuccess(true);
       // Refresh list
       await fetchAllDofs();
       // Update selected
       setSelectedDof({
         ...selectedDof,
-        status: editStatus,
-        adminFeedback: editFeedback,
+        ...updates,
       });
+      setDofs(prev => prev.map(d => d.id === selectedDof.id ? { ...d, ...updates } : d));
       setTimeout(() => setSaveSuccess(false), 3000);
     } catch (err) {
       console.error(err);
@@ -2388,7 +2684,176 @@ export default function DofAdmin() {
                   </div>
                 </div>
 
-                <div className="flex justify-end pt-2 gap-2">
+                {/* Önce ve Sonra Fotoğrafları Ekleme / Yönetim Alanı */}
+                <div className="mt-4 pt-4 border-t border-emerald-200/60 space-y-3">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <div>
+                      <div className="flex items-center gap-1.5 text-slate-900">
+                        <Camera className="h-4 w-4 text-emerald-600" />
+                        <h4 className="font-extrabold text-xs uppercase tracking-tight text-emerald-950">
+                          Faaliyet Öncesi ve Sonrası Durum Fotoğrafları (Önce & Sonra)
+                        </h4>
+                      </div>
+                      <p className="text-[10px] text-slate-500 mt-0.5">
+                        Sorunun ilk tespit edildiği durum ile çözüm sonrası durumun fotoğraflarını yükleyin. Bu fotoğraflar Yatık Kağıt Çıktısında yan yana yer alır.
+                      </p>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setLandscapeTargetDof(dof);
+                          setShowLandscapeModal(true);
+                        }}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 active:bg-indigo-200 text-indigo-700 font-bold rounded-lg text-xs transition cursor-pointer border border-indigo-200/60"
+                        title="Yatık Kağıt Çıktısı Önizleme ve Yazdırma"
+                        id="step3-landscape-btn"
+                      >
+                        <Printer className="h-3.5 w-3.5" />
+                        <span>Yatık Çıktı Al</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={handleSaveStep3Photos}
+                        disabled={isPhotoSaving || isCompressingPhoto}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-700 hover:bg-emerald-800 active:bg-emerald-900 text-white font-bold rounded-lg text-xs transition cursor-pointer shadow-2xs disabled:bg-slate-300"
+                        title="Fotoğrafları Kaydet"
+                      >
+                        <Check className="h-3.5 w-3.5" />
+                        <span>{isPhotoSaving ? "Kaydediliyor..." : "Fotoğrafları Kaydet"}</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {isCompressingPhoto && (
+                    <div className="p-2.5 bg-indigo-50 text-indigo-700 text-xs font-semibold rounded-xl border border-indigo-100 flex items-center gap-2 animate-pulse">
+                      <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                      Fotoğraf optimize edilip yükleniyor, lütfen bekleyin...
+                    </div>
+                  )}
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {/* 1. ÖNCE FOTOĞRAFI */}
+                    <div className="bg-white p-3.5 rounded-xl border border-rose-200 shadow-2xs space-y-2">
+                      <div className="flex items-center justify-between border-b border-rose-100 pb-2">
+                        <div className="flex items-center gap-2">
+                          <span className="px-2 py-0.5 bg-rose-100 text-rose-800 font-black text-[10px] rounded uppercase tracking-wider">
+                            1. ÖNCE (İlk Durum)
+                          </span>
+                          <span className="text-[10px] text-slate-500 font-semibold">Sorun / Uygunsuzluk Hali</span>
+                        </div>
+                        {step3BeforeImage && (
+                          <button
+                            type="button"
+                            onClick={() => setStep3BeforeImage("")}
+                            className="text-[10px] font-bold text-rose-600 hover:text-rose-800 transition cursor-pointer"
+                          >
+                            Kaldır
+                          </button>
+                        )}
+                      </div>
+
+                      {step3BeforeImage ? (
+                        <div className="relative group rounded-lg overflow-hidden border border-slate-200 bg-slate-900/5 aspect-video flex items-center justify-center">
+                          <img 
+                            src={step3BeforeImage} 
+                            alt="Önce" 
+                            className="w-full h-full object-contain max-h-44" 
+                          />
+                          <div className="absolute inset-0 bg-slate-950/40 opacity-0 group-hover:opacity-100 transition flex items-center justify-center gap-2">
+                            <label className="px-3 py-1.5 bg-white text-slate-800 text-[11px] font-bold rounded-lg shadow cursor-pointer hover:bg-slate-50">
+                              Değiştir
+                              <input 
+                                type="file" 
+                                accept="image/*" 
+                                className="hidden" 
+                                onChange={(e) => handlePhotoUpload(e, "before")} 
+                              />
+                            </label>
+                          </div>
+                        </div>
+                      ) : (
+                        <label className="border-2 border-dashed border-rose-200 hover:border-rose-400 bg-rose-50/20 hover:bg-rose-50/50 rounded-xl p-6 flex flex-col items-center justify-center gap-2 transition cursor-pointer min-h-[140px]">
+                          <Camera className="h-7 w-7 text-rose-400" />
+                          <span className="text-xs font-bold text-rose-900 text-center">
+                            Önce Fotoğrafı Seç veya Çek
+                          </span>
+                          <span className="text-[10px] text-slate-400 text-center">
+                            (Uygunsuzluğun ilk tespit edildiği hal)
+                          </span>
+                          <input 
+                            type="file" 
+                            accept="image/*" 
+                            className="hidden" 
+                            onChange={(e) => handlePhotoUpload(e, "before")} 
+                          />
+                        </label>
+                      )}
+                    </div>
+
+                    {/* 2. SONRA FOTOĞRAFI */}
+                    <div className="bg-white p-3.5 rounded-xl border border-emerald-200 shadow-2xs space-y-2">
+                      <div className="flex items-center justify-between border-b border-emerald-100 pb-2">
+                        <div className="flex items-center gap-2">
+                          <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 font-black text-[10px] rounded uppercase tracking-wider">
+                            2. SONRA (Çözülen Hal)
+                          </span>
+                          <span className="text-[10px] text-slate-500 font-semibold">Uygulama Sonrası Durum</span>
+                        </div>
+                        {step3AfterImage && (
+                          <button
+                            type="button"
+                            onClick={() => setStep3AfterImage("")}
+                            className="text-[10px] font-bold text-rose-600 hover:text-rose-800 transition cursor-pointer"
+                          >
+                            Kaldır
+                          </button>
+                        )}
+                      </div>
+
+                      {step3AfterImage ? (
+                        <div className="relative group rounded-lg overflow-hidden border border-slate-200 bg-slate-900/5 aspect-video flex items-center justify-center">
+                          <img 
+                            src={step3AfterImage} 
+                            alt="Sonra" 
+                            className="w-full h-full object-contain max-h-44" 
+                          />
+                          <div className="absolute inset-0 bg-slate-950/40 opacity-0 group-hover:opacity-100 transition flex items-center justify-center gap-2">
+                            <label className="px-3 py-1.5 bg-white text-slate-800 text-[11px] font-bold rounded-lg shadow cursor-pointer hover:bg-slate-50">
+                              Değiştir
+                              <input 
+                                type="file" 
+                                accept="image/*" 
+                                className="hidden" 
+                                onChange={(e) => handlePhotoUpload(e, "after")} 
+                              />
+                            </label>
+                          </div>
+                        </div>
+                      ) : (
+                        <label className="border-2 border-dashed border-emerald-200 hover:border-emerald-400 bg-emerald-50/20 hover:bg-emerald-50/50 rounded-xl p-6 flex flex-col items-center justify-center gap-2 transition cursor-pointer min-h-[140px]">
+                          <Camera className="h-7 w-7 text-emerald-500" />
+                          <span className="text-xs font-bold text-emerald-950 text-center">
+                            Sonra Fotoğrafı Seç veya Çek
+                          </span>
+                          <span className="text-[10px] text-slate-400 text-center">
+                            (Düzeltici/önleyici faaliyet sonrası nihai durum)
+                          </span>
+                          <input 
+                            type="file" 
+                            accept="image/*" 
+                            className="hidden" 
+                            onChange={(e) => handlePhotoUpload(e, "after")} 
+                          />
+                        </label>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center justify-between pt-3 gap-2 border-t border-emerald-100">
                   <button
                     type="button"
                     onClick={() => handleMarkProcessCompleted(dof)}
@@ -2401,10 +2866,10 @@ export default function DofAdmin() {
 
                   <button
                     onClick={handleWorkflowStep3Submit}
-                    disabled={isSaving || !step3ProgressUpdate.trim()}
-                    className="px-5 py-2.5 bg-slate-800 hover:bg-slate-900 text-white font-bold rounded-xl transition cursor-pointer"
+                    disabled={isSaving || (!step3ProgressUpdate.trim() && !step3BeforeImage && !step3AfterImage)}
+                    className="px-5 py-2.5 bg-slate-800 hover:bg-slate-900 active:bg-slate-950 text-white font-bold rounded-xl transition cursor-pointer flex items-center gap-1.5"
                   >
-                    {isSaving ? "Kaydediliyor..." : "İlerleme Notunu Kaydet"}
+                    {isSaving ? "Kaydediliyor..." : "İlerleme Notu & Fotoğrafları Kaydet"}
                   </button>
                 </div>
               </div>
@@ -2438,12 +2903,35 @@ export default function DofAdmin() {
                       <option value="cozuldu">Çözüldü / Tamamlandı</option>
                       <option value="reddedildi">Reddedildi / İptal</option>
                     </select>
+
+                    {/* Kapatılan DÖF Klasörü Seçimi */}
+                    <div className="mt-3">
+                      <label className="text-[10px] font-extrabold text-slate-500 uppercase block mb-1 flex items-center gap-1">
+                        <FolderKanban className="h-3.5 w-3.5 text-indigo-500" />
+                        Kapatılan DÖF Klasörü (Arşiv)
+                      </label>
+                      <select
+                        value={selectedFolderForClose}
+                        onChange={(e) => setSelectedFolderForClose(e.target.value)}
+                        className="w-full bg-white border border-slate-200 rounded-xl p-2.5 outline-none focus:border-indigo-500 font-semibold cursor-pointer text-xs"
+                      >
+                        <option value="">-- Klasör Seçilmedi (Varsayılan) --</option>
+                        {folders.map(f => (
+                          <option key={f.id} value={f.id}>
+                            📁 {f.name}
+                          </option>
+                        ))}
+                      </select>
+                      <span className="text-[10px] text-slate-400 mt-1 block">
+                        DÖF kapatıldığında doğrudan bu klasöre taşınır.
+                      </span>
+                    </div>
                   </div>
 
                   <div className="md:col-span-2">
                     <label className="text-[10px] font-extrabold text-slate-500 uppercase block mb-1">Nihai Geri Bildirim / Kapatma Karar Notu</label>
                     <textarea
-                      rows={3}
+                      rows={5}
                       value={editFeedback}
                       onChange={(e) => setEditFeedback(e.target.value)}
                       placeholder="Bildirim sahibine ve ilgili birime iletilecek resmi yanıtı yazın..."
@@ -2494,25 +2982,21 @@ export default function DofAdmin() {
     // Remaining Days Calculation
     let remainingText = "Belirsiz";
     let remainingBadgeStyle = "bg-slate-100 text-slate-800";
-    if (dof.targetCompletionDate) {
-      const targetDate = new Date(dof.targetCompletionDate);
-      const today = new Date();
-      targetDate.setHours(0,0,0,0);
-      today.setHours(0,0,0,0);
-      const diffMs = targetDate.getTime() - today.getTime();
-      const diffDays = Math.round(diffMs / (1000 * 60 * 60 * 24));
+    const effectiveTargetDate = dof.targetCompletionDate || computeTargetCompletionDate(dof.createdAt, dof.type);
+    if (effectiveTargetDate) {
+      const rem = getRemainingBusinessDays(effectiveTargetDate);
       
       if (dof.status === "cozuldu" || dof.status === "reddedildi") {
         remainingText = "Tamamlandı";
         remainingBadgeStyle = "bg-emerald-100 text-emerald-800";
-      } else if (diffDays < 0) {
-        remainingText = `Gecikmiş (${Math.abs(diffDays)} Gün)`;
+      } else if (rem.isOverdue) {
+        remainingText = rem.text;
         remainingBadgeStyle = "bg-rose-100 text-rose-800 font-extrabold animate-pulse";
-      } else if (diffDays === 0) {
+      } else if (rem.isToday) {
         remainingText = "Bugün Son Gün!";
         remainingBadgeStyle = "bg-amber-100 text-amber-800 font-extrabold animate-pulse";
       } else {
-        remainingText = `${diffDays} Gün Kaldı`;
+        remainingText = rem.text;
         remainingBadgeStyle = "bg-indigo-100 text-indigo-800 font-bold";
       }
     }
@@ -2933,6 +3417,104 @@ export default function DofAdmin() {
                   </div>
                 );
               })}
+            </div>
+          </div>
+        )}
+
+        {/* Önce & Sonra Fotoğrafları ve Görsel Kanıt */}
+        {(dof.beforeImageUrl || dof.afterImageUrl || dof.imageUrl) && (
+          <div className="bg-white border border-slate-100 rounded-2xl p-6 shadow-xs space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-50 pb-2.5">
+              <div className="flex items-center gap-2">
+                <Camera className="h-4.5 w-4.5 text-indigo-600" />
+                <h4 className="text-xs font-bold uppercase tracking-wider text-slate-800">
+                  Önce ve Sonra Durum Fotoğrafları (Görsel Karşılaştırma)
+                </h4>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setLandscapeTargetDof(dof);
+                  setShowLandscapeModal(true);
+                }}
+                className="inline-flex items-center gap-1.5 px-3 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 font-bold rounded-lg text-xs transition cursor-pointer border border-emerald-200"
+              >
+                <Printer className="h-3.5 w-3.5 text-emerald-600" /> Yatık Çıktı Al
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* Önce */}
+              <div className="border border-rose-200 bg-rose-50/20 rounded-xl p-3 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="px-2 py-0.5 bg-rose-100 text-rose-800 text-[10px] font-black rounded uppercase">
+                    1. ÖNCE (İlk Durum / Problem)
+                  </span>
+                  <span className="text-[10px] text-slate-400">Uygunsuzluk Tespiti</span>
+                </div>
+                {(dof.beforeImageUrl || dof.imageUrl) ? (
+                  <div className="aspect-video bg-white rounded-lg border border-slate-200 overflow-hidden flex items-center justify-center">
+                    <img 
+                      src={dof.beforeImageUrl || dof.imageUrl} 
+                      alt="Önce" 
+                      className="w-full h-full object-contain max-h-48" 
+                    />
+                  </div>
+                ) : (
+                  <div className="aspect-video bg-slate-50 rounded-lg border border-dashed border-slate-200 flex flex-col items-center justify-center p-4 text-center">
+                    <ImageIcon className="h-6 w-6 text-slate-300 mb-1" />
+                    <span className="text-xs text-slate-400">Önce fotoğrafı henüz eklenmedi</span>
+                  </div>
+                )}
+                {(dof.beforeImageUrl || dof.imageUrl) && (
+                  <div className="flex justify-end gap-2 pt-1">
+                    <a 
+                      href={dof.beforeImageUrl || dof.imageUrl} 
+                      target="_blank" 
+                      rel="noreferrer"
+                      className="text-[11px] font-bold text-indigo-600 hover:text-indigo-800"
+                    >
+                      Büyük Önizleme
+                    </a>
+                  </div>
+                )}
+              </div>
+
+              {/* Sonra */}
+              <div className="border border-emerald-200 bg-emerald-50/20 rounded-xl p-3 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 text-[10px] font-black rounded uppercase">
+                    2. SONRA (Çözülen Durum)
+                  </span>
+                  <span className="text-[10px] text-slate-400">Faaliyet Sonucu</span>
+                </div>
+                {dof.afterImageUrl ? (
+                  <div className="aspect-video bg-white rounded-lg border border-slate-200 overflow-hidden flex items-center justify-center">
+                    <img 
+                      src={dof.afterImageUrl} 
+                      alt="Sonra" 
+                      className="w-full h-full object-contain max-h-48" 
+                    />
+                  </div>
+                ) : (
+                  <div className="aspect-video bg-slate-50 rounded-lg border border-dashed border-slate-200 flex flex-col items-center justify-center p-4 text-center">
+                    <ImageIcon className="h-6 w-6 text-slate-300 mb-1" />
+                    <span className="text-xs text-slate-400">Sonra fotoğrafı henüz eklenmedi</span>
+                  </div>
+                )}
+                {dof.afterImageUrl && (
+                  <div className="flex justify-end gap-2 pt-1">
+                    <a 
+                      href={dof.afterImageUrl} 
+                      target="_blank" 
+                      rel="noreferrer"
+                      className="text-[11px] font-bold text-emerald-600 hover:text-emerald-800"
+                    >
+                      Büyük Önizleme
+                    </a>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         )}
@@ -3708,154 +4290,402 @@ export default function DofAdmin() {
         </AnimatePresence>
       </div>
 
-      <div className={`min-h-screen flex flex-col lg:flex-row bg-slate-100 rounded-3xl overflow-hidden border border-slate-200 shadow-sm ${showPosterModal ? "print:hidden" : ""}`}>
-        {/* Left Sidebar Menu */}
-        <aside className="w-full lg:w-72 bg-slate-900 text-slate-300 shrink-0 flex flex-col border-r border-slate-800 shadow-xl">
-          <div className="p-5 flex flex-col gap-5">
-            {/* Brand Header */}
-            <div className="flex items-center gap-3">
-              <span className="p-2.5 bg-indigo-600 text-white rounded-xl shadow-lg shrink-0">
-                <Shield className="h-5 w-5" />
-              </span>
-              <div>
-                <h2 className="font-display font-bold text-white text-xs leading-none">
-                  {isSystemAdmin ? "DÖF Yönetim Paneli" : "KYS Kontrol Paneli"}
-                </h2>
-                <span className="text-[10px] font-semibold text-slate-400 tracking-wider block mt-1 uppercase truncate max-w-[170px]">
-                  {isSystemAdmin ? "YÖNETİCİ PANELİ" : (activePanelUser?.department || "BİRİM PANELİ")}
-                </span>
-              </div>
-            </div>
+      {/* Sol Menü Hover Tetikleyici (Kullanılmadığında Gizli, Üzerine Gelindiğinde Gözükür) */}
+      {!isSidebarPinned && (
+        <>
+          {/* Ekranın en sol kenarında görünmez hover algılama alanı (16px) */}
+          {!isSidebarHovered && (
+            <div
+              onMouseEnter={() => setIsSidebarHovered(true)}
+              className="hidden lg:block fixed left-0 top-0 bottom-0 w-4 z-40 pointer-events-auto"
+            />
+          )}
 
-            {/* Nav Menu */}
-            <nav className="flex flex-col gap-1.5">
-              <div className="pb-1 px-4">
-                <span className="text-[9px] font-bold text-slate-500 uppercase tracking-widest block">
-                  {isSystemAdmin ? "ANA PANEL" : "BİRİM İŞLEMLERİ"}
-                </span>
-              </div>
-              
-              <button
-                onClick={() => setAdminSubTab("dashboard")}
-                className={`flex items-center gap-3 px-4 py-2.5 text-xs font-bold rounded-xl transition cursor-pointer text-left ${
-                  adminSubTab === "dashboard"
-                    ? "bg-indigo-600 text-white"
-                    : "text-slate-400 hover:bg-slate-800 hover:text-slate-200"
-                }`}
-              >
-                <LayoutDashboard className="h-4 w-4" />
-                Dashboard
-              </button>
+          {/* Sol Kenar Yüzen 'Menü' Sekmesi */}
+          <div
+            onMouseEnter={() => setIsSidebarHovered(true)}
+            className="hidden lg:flex fixed left-0 top-32 z-40 bg-slate-900/95 hover:bg-indigo-600 text-white px-2 py-3.5 rounded-r-2xl border-y border-r border-slate-700/80 shadow-2xl cursor-pointer transition-all duration-300 flex-col items-center gap-2 group backdrop-blur-xs"
+            title="Menüyü Görüntülemek İçin Üzerine Gelin"
+          >
+            <Menu className="h-4 w-4 text-indigo-400 group-hover:text-white" />
+            <span className="text-[9px] font-bold uppercase tracking-widest [writing-mode:vertical-lr] text-slate-400 group-hover:text-white">
+              Menü
+            </span>
+            <ChevronRight className="h-3 w-3 text-slate-500 group-hover:text-white group-hover:translate-x-0.5 transition" />
+          </div>
+        </>
+      )}
 
-              <button
-                onClick={() => setAdminSubTab("dofs")}
-                className={`flex items-center justify-between px-4 py-2.5 text-xs font-bold rounded-xl transition cursor-pointer text-left ${
-                  adminSubTab === "dofs"
-                    ? "bg-indigo-600 text-white"
-                    : "text-slate-400 hover:bg-slate-800 hover:text-slate-200"
-                }`}
-              >
-                <div className="flex items-center gap-3">
-                  <Grid className="h-4 w-4" />
-                  {isSystemAdmin ? "Tüm DÖF'ler" : "Birim DÖF'leri"}
-                </div>
-                {newCount > 0 && (
-                  <span className="px-1.5 py-0.5 rounded-full bg-blue-500 text-white text-[9px] font-bold animate-pulse">
-                    {newCount}
-                  </span>
-                )}
-              </button>
+      {/* Mobile Top Navigation Bar */}
+      <div className="lg:hidden bg-slate-900 text-white px-4 py-3 flex items-center justify-between border-b border-slate-800 rounded-t-3xl">
+        <div className="flex items-center gap-2.5">
+          <span className="p-1.5 bg-indigo-600 text-white rounded-lg shadow-sm">
+            <Shield className="h-4 w-4" />
+          </span>
+          <div>
+            <span className="font-bold text-xs text-white block">
+              {isSystemAdmin ? "DÖF Yönetim Paneli" : "KYS Kontrol Paneli"}
+            </span>
+            <span className="text-[9px] text-slate-400 uppercase">
+              {isSystemAdmin ? "Yönetici" : (activePanelUser?.department || "Birim")}
+            </span>
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={() => setIsMobileSidebarOpen(!isMobileSidebarOpen)}
+          className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition cursor-pointer"
+          title="Menüyü Aç/Kapat"
+        >
+          {isMobileSidebarOpen ? <X className="h-4 w-4" /> : <Menu className="h-4 w-4" />}
+        </button>
+      </div>
 
-              <button
-                onClick={() => setAdminSubTab("new_dof")}
-                className={`flex items-center gap-3 px-4 py-2.5 text-xs font-bold rounded-xl transition cursor-pointer text-left ${
-                  adminSubTab === "new_dof"
-                    ? "bg-indigo-600 text-white"
-                    : "text-slate-400 hover:bg-slate-800 hover:text-slate-200"
-                }`}
-              >
-                <span className="text-sm font-bold leading-none">+</span>
-                Yeni DÖF Oluşturma
-              </button>
+      <div className={`min-h-screen flex flex-col lg:flex-row bg-slate-100 rounded-3xl overflow-hidden border border-slate-200 shadow-sm relative ${showPosterModal ? "print:hidden" : ""}`}>
+        {/* Mobile Backdrop Overlay */}
+        {isMobileSidebarOpen && (
+          <div
+            onClick={() => setIsMobileSidebarOpen(false)}
+            className="fixed inset-0 bg-slate-950/60 backdrop-blur-xs z-40 lg:hidden"
+          />
+        )}
 
-              <button
-                onClick={() => setAdminSubTab("reports")}
-                className={`flex items-center gap-3 px-4 py-2.5 text-xs font-bold rounded-xl transition cursor-pointer text-left ${
-                  adminSubTab === "reports"
-                    ? "bg-indigo-600 text-white"
-                    : "text-slate-400 hover:bg-slate-800 hover:text-slate-200"
-                }`}
-              >
-                <Sparkles className="h-4 w-4" />
-                {isSystemAdmin ? "Raporlar & Analiz" : "Birim Raporları"}
-              </button>
+        {/* Desktop Sidebar Width Reservation (Only reserves space when pinned) */}
+        <div 
+          className={`hidden lg:block shrink-0 transition-all duration-300 ${
+            isSidebarPinned ? "w-72" : "w-0"
+          }`}
+        />
 
-              {/* YÖNETİM PANELİ Bölümü - SADECE YÖNETİCİ YETKİSİ OLANLARDA GÖRÜNÜR */}
-              {isSystemAdmin && (
-                <>
-                  <div className="pt-4 pb-1 px-4">
-                    <span className="text-[9px] font-bold text-slate-500 uppercase tracking-widest block">YÖNETİM PANELİ</span>
+        {/* Left Sidebar Menu (Auto-collapsing when not used, expands on hover) */}
+        <aside
+          onMouseEnter={() => setIsSidebarHovered(true)}
+          onMouseLeave={() => setIsSidebarHovered(false)}
+          className={`
+            bg-slate-900 text-slate-300 flex flex-col border-r border-slate-800 transition-all duration-300 ease-in-out
+            ${/* Mobile drawer behavior */ ""}
+            ${isMobileSidebarOpen 
+              ? "fixed inset-y-0 left-0 w-72 z-50 flex shadow-2xl" 
+              : "hidden lg:flex"
+            }
+            ${/* Desktop collapsible behavior */ ""}
+            ${isSidebarPinned
+              ? "lg:relative lg:w-72 lg:shadow-xl lg:translate-x-0"
+              : isSidebarHovered
+                ? "lg:fixed lg:top-0 lg:bottom-0 lg:left-0 lg:w-72 lg:z-50 lg:shadow-2xl lg:translate-x-0 opacity-100 pointer-events-auto"
+                : "lg:fixed lg:top-0 lg:bottom-0 lg:left-0 lg:w-72 lg:z-50 lg:-translate-x-full opacity-0 pointer-events-none"
+            }
+          `}
+        >
+          {(() => {
+            const isExpanded = isSidebarPinned || isSidebarHovered || isMobileSidebarOpen;
+
+            return (
+              <div className="p-4 flex flex-col gap-4 h-full overflow-y-auto overflow-x-hidden">
+                {/* Brand Header & Toggle Controls */}
+                <div className="space-y-3 pb-3 border-b border-slate-800">
+                  <div className={`flex items-center gap-3 ${!isExpanded ? "justify-center" : "justify-between"}`}>
+                    <div className="flex items-center gap-2.5">
+                      <span className="p-2 bg-indigo-600 text-white rounded-xl shadow-lg shrink-0">
+                        <Shield className="h-5 w-5" />
+                      </span>
+                      {isExpanded && (
+                        <div className="min-w-0">
+                          <h2 className="font-display font-bold text-white text-xs leading-none truncate">
+                            {isSystemAdmin ? "DÖF Yönetim Paneli" : "KYS Kontrol Paneli"}
+                          </h2>
+                          <span className="text-[10px] font-semibold text-slate-400 tracking-wider block mt-1 uppercase truncate max-w-[170px]">
+                            {isSystemAdmin ? "YÖNETİCİ PANELİ" : (activePanelUser?.department || "BİRİM PANELİ")}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Pin Toggle Button when Expanded */}
+                    {isExpanded && (
+                      <div className="flex items-center gap-1 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const next = !isSidebarPinned;
+                            setIsSidebarPinned(next);
+                            localStorage.setItem("dof_admin_sidebar_pinned", String(next));
+                          }}
+                          className={`flex items-center gap-1.5 px-2.5 py-1 text-[10px] font-bold rounded-lg transition cursor-pointer ${
+                            isSidebarPinned
+                              ? "bg-indigo-600 text-white shadow-xs"
+                              : "bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white"
+                          }`}
+                          title={isSidebarPinned ? "Sabitlemeyi Kaldır (Otomatik Gizleme Moduna Geç)" : "Menüyü Sürekli Açık Sabitle"}
+                        >
+                          {isSidebarPinned ? <Pin className="h-3.5 w-3.5" /> : <PinOff className="h-3.5 w-3.5 text-slate-400" />}
+                          <span>{isSidebarPinned ? "Sabit" : "Oto Gizle"}</span>
+                        </button>
+                      </div>
+                    )}
                   </div>
 
-                  <button
-                    onClick={() => setAdminSubTab("users")}
-                    className={`flex items-center gap-3 px-4 py-2.5 text-xs font-bold rounded-xl transition cursor-pointer text-left ${
-                      adminSubTab === "users"
-                        ? "bg-indigo-600 text-white"
-                        : "text-slate-400 hover:bg-slate-800 hover:text-slate-200"
-                    }`}
-                  >
-                    <Users className="h-4 w-4" />
-                    Kullanıcılar
-                  </button>
+                  {/* Mode explanation banner when expanded */}
+                  {isExpanded && (
+                    <div className="flex items-center justify-between text-[10px] px-2.5 py-1.5 bg-slate-800/60 rounded-xl border border-slate-700/50 text-slate-400">
+                      <span className="flex items-center gap-1.5">
+                        <span className={`w-1.5 h-1.5 rounded-full ${isSidebarPinned ? "bg-indigo-400" : "bg-emerald-400 animate-pulse"}`} />
+                        {isSidebarPinned ? "Menü Sabit Açık" : "Fare Ayrıldığında Gizlenir"}
+                      </span>
+                      <span className="text-[9px] text-slate-500 font-mono">
+                        {isSidebarPinned ? "Kilitli" : "Hover Açılır"}
+                      </span>
+                    </div>
+                  )}
+                </div>
 
-                  <button
-                    onClick={() => setAdminSubTab("departments")}
-                    className={`flex items-center gap-3 px-4 py-2.5 text-xs font-bold rounded-xl transition cursor-pointer text-left ${
-                      adminSubTab === "departments"
-                        ? "bg-indigo-600 text-white"
-                        : "text-slate-400 hover:bg-slate-800 hover:text-slate-200"
-                    }`}
-                  >
-                    <Building className="h-4 w-4" />
-                    Departmanlar
-                  </button>
-
-                  <button
-                    onClick={() => setAdminSubTab("remote")}
-                    className={`flex items-center gap-3 px-4 py-2.5 text-xs font-bold rounded-xl transition cursor-pointer text-left ${
-                      adminSubTab === "remote"
-                        ? "bg-indigo-600 text-white"
-                        : "text-slate-400 hover:bg-slate-800 hover:text-slate-200"
-                    }`}
-                  >
-                    <QrCode className="h-4 w-4" />
-                    Uzak Bağlantı & QR
-                  </button>
-
+                {/* Nav Menu */}
+                <nav className="flex flex-col gap-1.5 flex-1">
+                  {/* Category 1 Header */}
+                  {isExpanded ? (
+                    <div className="pb-1 px-3">
+                      <span className="text-[9px] font-bold text-slate-500 uppercase tracking-widest block">
+                        {isSystemAdmin ? "ANA PANEL" : "BİRİM İŞLEMLERİ"}
+                      </span>
+                    </div>
+                  ) : (
+                    <div className="my-1 border-t border-slate-800" />
+                  )}
+                  
+                  {/* Dashboard Tab */}
                   <button
                     onClick={() => {
-                      setAdminSubTab("logs");
-                      fetchLogs();
+                      setAdminSubTab("dashboard");
+                      setIsMobileSidebarOpen(false);
                     }}
-                    className={`flex items-center gap-3 px-4 py-2.5 text-xs font-bold rounded-xl transition cursor-pointer text-left ${
-                      adminSubTab === "logs"
-                        ? "bg-indigo-600 text-white"
+                    className={`flex items-center gap-3 px-3 py-2.5 text-xs font-bold rounded-xl transition cursor-pointer text-left relative ${
+                      adminSubTab === "dashboard"
+                        ? "bg-indigo-600 text-white shadow-md shadow-indigo-950/60"
                         : "text-slate-400 hover:bg-slate-800 hover:text-slate-200"
-                    }`}
+                    } ${!isExpanded ? "justify-center" : ""}`}
+                    title={!isExpanded ? "Dashboard" : undefined}
                   >
-                    <Mail className="h-4 w-4" />
-                    Sistem Logları
+                    <LayoutDashboard className="h-5 w-5 shrink-0" />
+                    {isExpanded && <span className="truncate flex-1">Dashboard</span>}
                   </button>
-                </>
-              )}
-            </nav>
-          </div>
+
+                  {/* Tüm DÖF'ler Tab */}
+                  <button
+                    onClick={() => {
+                      setAdminSubTab("dofs");
+                      setIsMobileSidebarOpen(false);
+                    }}
+                    className={`flex items-center justify-between px-3 py-2.5 text-xs font-bold rounded-xl transition cursor-pointer text-left relative ${
+                      adminSubTab === "dofs"
+                        ? "bg-indigo-600 text-white shadow-md shadow-indigo-950/60"
+                        : "text-slate-400 hover:bg-slate-800 hover:text-slate-200"
+                    } ${!isExpanded ? "justify-center" : ""}`}
+                    title={!isExpanded ? (isSystemAdmin ? "Tüm DÖF'ler" : "Birim DÖF'leri") : undefined}
+                  >
+                    <div className="flex items-center gap-3 min-w-0">
+                      <Grid className="h-5 w-5 shrink-0" />
+                      {isExpanded && (
+                        <span className="truncate">
+                          {isSystemAdmin ? "Tüm DÖF'ler" : "Birim DÖF'leri"}
+                        </span>
+                      )}
+                    </div>
+                    {newCount > 0 && (
+                      isExpanded ? (
+                        <span className="px-1.5 py-0.5 rounded-full bg-blue-500 text-white text-[9px] font-bold animate-pulse shrink-0">
+                          {newCount}
+                        </span>
+                      ) : (
+                        <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-blue-500 ring-2 ring-slate-900 animate-pulse" />
+                      )
+                    )}
+                  </button>
+
+                  {/* Klasör Yönetimi Tab */}
+                  <button
+                    onClick={() => {
+                      setAdminSubTab("folders");
+                      setIsMobileSidebarOpen(false);
+                    }}
+                    className={`flex items-center justify-between px-3 py-2.5 text-xs font-bold rounded-xl transition cursor-pointer text-left relative ${
+                      adminSubTab === "folders"
+                        ? "bg-indigo-600 text-white shadow-md shadow-indigo-950/60"
+                        : "text-slate-400 hover:bg-slate-800 hover:text-slate-200"
+                    } ${!isExpanded ? "justify-center" : ""}`}
+                    title={!isExpanded ? "Klasör Yönetimi" : undefined}
+                  >
+                    <div className="flex items-center gap-3 min-w-0">
+                      <FolderKanban className="h-5 w-5 shrink-0" />
+                      {isExpanded && <span className="truncate">Klasör Yönetimi</span>}
+                    </div>
+                    {folders.length > 0 && (
+                      isExpanded ? (
+                        <span className="px-1.5 py-0.5 rounded-full bg-slate-800 text-slate-300 text-[10px] font-mono shrink-0 border border-slate-700">
+                          {folders.length}
+                        </span>
+                      ) : (
+                        <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-indigo-400 ring-2 ring-slate-900" />
+                      )
+                    )}
+                  </button>
+
+                  {/* Yeni DÖF Oluşturma Tab */}
+                  <button
+                    onClick={() => {
+                      setAdminSubTab("new_dof");
+                      setIsMobileSidebarOpen(false);
+                    }}
+                    className={`flex items-center gap-3 px-3 py-2.5 text-xs font-bold rounded-xl transition cursor-pointer text-left relative ${
+                      adminSubTab === "new_dof"
+                        ? "bg-indigo-600 text-white shadow-md shadow-indigo-950/60"
+                        : "text-slate-400 hover:bg-slate-800 hover:text-slate-200"
+                    } ${!isExpanded ? "justify-center" : ""}`}
+                    title={!isExpanded ? "Yeni DÖF Oluşturma" : undefined}
+                  >
+                    <Plus className="h-5 w-5 shrink-0" />
+                    {isExpanded && <span className="truncate flex-1">Yeni DÖF Oluşturma</span>}
+                  </button>
+
+                  {/* Raporlar & Analiz Tab */}
+                  <button
+                    onClick={() => {
+                      setAdminSubTab("reports");
+                      setIsMobileSidebarOpen(false);
+                    }}
+                    className={`flex items-center gap-3 px-3 py-2.5 text-xs font-bold rounded-xl transition cursor-pointer text-left relative ${
+                      adminSubTab === "reports"
+                        ? "bg-indigo-600 text-white shadow-md shadow-indigo-950/60"
+                        : "text-slate-400 hover:bg-slate-800 hover:text-slate-200"
+                    } ${!isExpanded ? "justify-center" : ""}`}
+                    title={!isExpanded ? (isSystemAdmin ? "Raporlar & Analiz" : "Birim Raporları") : undefined}
+                  >
+                    <Sparkles className="h-5 w-5 shrink-0" />
+                    {isExpanded && (
+                      <span className="truncate flex-1">
+                        {isSystemAdmin ? "Raporlar & Analiz" : "Birim Raporları"}
+                      </span>
+                    )}
+                  </button>
+
+                  {/* YÖNETİM PANELİ Bölümü - SADECE YÖNETİCİ YETKİSİ OLANLARDA GÖRÜNÜR */}
+                  {isSystemAdmin && (
+                    <>
+                      {isExpanded ? (
+                        <div className="pt-3 pb-1 px-3">
+                          <span className="text-[9px] font-bold text-slate-500 uppercase tracking-widest block">
+                            YÖNETİM PANELİ
+                          </span>
+                        </div>
+                      ) : (
+                        <div className="my-1 border-t border-slate-800" />
+                      )}
+
+                      <button
+                        onClick={() => {
+                          setAdminSubTab("users");
+                          setIsMobileSidebarOpen(false);
+                        }}
+                        className={`flex items-center gap-3 px-3 py-2.5 text-xs font-bold rounded-xl transition cursor-pointer text-left relative ${
+                          adminSubTab === "users"
+                            ? "bg-indigo-600 text-white shadow-md shadow-indigo-950/60"
+                            : "text-slate-400 hover:bg-slate-800 hover:text-slate-200"
+                        } ${!isExpanded ? "justify-center" : ""}`}
+                        title={!isExpanded ? "Kullanıcılar" : undefined}
+                      >
+                        <Users className="h-5 w-5 shrink-0" />
+                        {isExpanded && <span className="truncate flex-1">Kullanıcılar</span>}
+                      </button>
+
+                      <button
+                        onClick={() => {
+                          setAdminSubTab("departments");
+                          setIsMobileSidebarOpen(false);
+                        }}
+                        className={`flex items-center gap-3 px-3 py-2.5 text-xs font-bold rounded-xl transition cursor-pointer text-left relative ${
+                          adminSubTab === "departments"
+                            ? "bg-indigo-600 text-white shadow-md shadow-indigo-950/60"
+                            : "text-slate-400 hover:bg-slate-800 hover:text-slate-200"
+                        } ${!isExpanded ? "justify-center" : ""}`}
+                        title={!isExpanded ? "Departmanlar" : undefined}
+                      >
+                        <Building className="h-5 w-5 shrink-0" />
+                        {isExpanded && <span className="truncate flex-1">Departmanlar</span>}
+                      </button>
+
+                      <button
+                        onClick={() => {
+                          setAdminSubTab("remote");
+                          setIsMobileSidebarOpen(false);
+                        }}
+                        className={`flex items-center gap-3 px-3 py-2.5 text-xs font-bold rounded-xl transition cursor-pointer text-left relative ${
+                          adminSubTab === "remote"
+                            ? "bg-indigo-600 text-white shadow-md shadow-indigo-950/60"
+                            : "text-slate-400 hover:bg-slate-800 hover:text-slate-200"
+                        } ${!isExpanded ? "justify-center" : ""}`}
+                        title={!isExpanded ? "Uzak Bağlantı & QR" : undefined}
+                      >
+                        <QrCode className="h-5 w-5 shrink-0" />
+                        {isExpanded && <span className="truncate flex-1">Uzak Bağlantı & QR</span>}
+                      </button>
+
+                      <button
+                        onClick={() => {
+                          setAdminSubTab("logs");
+                          fetchLogs();
+                          setIsMobileSidebarOpen(false);
+                        }}
+                        className={`flex items-center gap-3 px-3 py-2.5 text-xs font-bold rounded-xl transition cursor-pointer text-left relative ${
+                          adminSubTab === "logs"
+                            ? "bg-indigo-600 text-white shadow-md shadow-indigo-950/60"
+                            : "text-slate-400 hover:bg-slate-800 hover:text-slate-200"
+                        } ${!isExpanded ? "justify-center" : ""}`}
+                        title={!isExpanded ? "Sistem Logları" : undefined}
+                      >
+                        <Mail className="h-5 w-5 shrink-0" />
+                        {isExpanded && <span className="truncate flex-1">Sistem Logları</span>}
+                      </button>
+                    </>
+                  )}
+                </nav>
+
+                {/* Footer Micro-help when expanded */}
+                {isExpanded && (
+                  <div className="pt-2 border-t border-slate-800/80 text-[10px] text-slate-500 text-center">
+                    <span>Fare ayrıldığında menü gizlenir</span>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
         </aside>
 
         {/* Main Workspace Column */}
         <main className="flex-1 bg-white p-6 sm:p-8 overflow-y-auto">
           <div className="flex flex-col gap-6">
+            {/* DÖF Üst Yönetici Özet Kartı: Toplam DÖF Sayısı, Devam Eden ve Tamamlanan Faaliyet Oranları */}
+            {(adminSubTab === "dashboard" || adminSubTab === "dofs") && (
+              <DofExecutiveSummaryCard
+                totalCount={totalCount}
+                resolvedCount={resolvedCount}
+                openCount={openCount}
+                newCount={newCount}
+                reviewCount={reviewCount}
+                rejectedCount={rejectedCount}
+                correctiveCount={correctiveCount}
+                preventiveCount={preventiveCount}
+                urgentCount={urgentCount}
+                correctiveDays={correctiveDaysSetting}
+                preventiveDays={preventiveDaysSetting}
+                statusFilter={statusFilter}
+                typeFilter={typeFilter}
+                onFilterClick={(status, type) => {
+                  setStatusFilter(status);
+                  if (type !== undefined) setTypeFilter(type);
+                  if (adminSubTab !== "dofs") setAdminSubTab("dofs");
+                }}
+              />
+            )}
+
             {/* Layout customization active banner */}
         {isEditingLayout && (
           <motion.div 
@@ -4342,6 +5172,22 @@ export default function DofAdmin() {
           <div className="w-full flex flex-col gap-6">
             
             {/* Custom Sub-Tabs Render Block */}
+            {adminSubTab === "folders" && (
+              <div className="space-y-6">
+                <DofFolderManager
+                  folders={folders}
+                  dofs={dofs}
+                  isSystemAdmin={isSystemAdmin}
+                  onFilterByFolder={(targetFolderId) => {
+                    setFolderFilter(targetFolderId);
+                    setAdminSubTab("dofs");
+                  }}
+                  onRefresh={fetchAllDofs}
+                  onMoveClosedToFolder={handleMoveAllClosedToFolder}
+                />
+              </div>
+            )}
+
             {adminSubTab === "new_dof" && (
               <div className="bg-white border border-slate-100 rounded-3xl p-6 shadow-md max-w-3xl mx-auto w-full">
                 <h2 className="text-xl font-display font-bold text-slate-800 mb-6 flex items-center gap-2">
@@ -5366,7 +6212,7 @@ export default function DofAdmin() {
                   <div className="flex items-center gap-2">
                     <SlidersHorizontal className="h-4 w-4 text-indigo-500" />
                     <span>Gelişmiş Filtreler & Arama</span>
-                    {(searchTerm || statusFilter !== "all" || typeFilter !== "all" || deptFilter !== "all" || referralFilter !== "all" || dateRangePreset !== "all" || dateStart || dateEnd) && (
+                    {(searchTerm || statusFilter !== "all" || typeFilter !== "all" || deptFilter !== "all" || referralFilter !== "all" || folderFilter !== "all" || dateRangePreset !== "all" || dateStart || dateEnd) && (
                       <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-600 text-[9px] font-extrabold uppercase border border-indigo-100 animate-pulse">
                         <span className="h-1.5 w-1.5 rounded-full bg-indigo-500" />
                         Aktif
@@ -5391,7 +6237,7 @@ export default function DofAdmin() {
                     </div>
 
                     {/* Grid of Select Dropdowns */}
-                    <div className="grid grid-cols-2 gap-2">
+                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2">
                       <div>
                         <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wide block mb-1">Durum / Aşama</label>
                         <select
@@ -5451,6 +6297,29 @@ export default function DofAdmin() {
                           <option value="yapildi">Yapılanlar / Tamamlananlar</option>
                         </select>
                       </div>
+
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wide block mb-1 flex items-center gap-1">
+                          <FolderKanban className="h-3 w-3 text-indigo-500" />
+                          Klasör
+                        </label>
+                        <select
+                          value={folderFilter}
+                          onChange={(e) => setFolderFilter(e.target.value)}
+                          className="w-full bg-slate-50 border border-slate-200 rounded-lg p-1.5 text-xs outline-none focus:border-indigo-500 font-medium font-semibold"
+                        >
+                          <option value="all">Tüm Klasörler</option>
+                          <option value="unassigned">Klasörsüz DÖF'ler</option>
+                          {folders.map((f) => {
+                            const count = dofs.filter(d => d.folderId === f.id).length;
+                            return (
+                              <option key={f.id} value={f.id}>
+                                📁 {f.name} ({count})
+                              </option>
+                            );
+                          })}
+                        </select>
+                      </div>
                     </div>
 
                     {/* Advanced Date Filter Section */}
@@ -5501,7 +6370,7 @@ export default function DofAdmin() {
                     </div>
 
                     {/* Clear Filters Button */}
-                    {(searchTerm || statusFilter !== "all" || typeFilter !== "all" || deptFilter !== "all" || referralFilter !== "all" || dateRangePreset !== "all" || dateStart || dateEnd) && (
+                    {(searchTerm || statusFilter !== "all" || typeFilter !== "all" || deptFilter !== "all" || referralFilter !== "all" || folderFilter !== "all" || dateRangePreset !== "all" || dateStart || dateEnd) && (
                       <button
                         onClick={() => {
                           setSearchTerm("");
@@ -5509,6 +6378,7 @@ export default function DofAdmin() {
                           setTypeFilter("all");
                           setDeptFilter("all");
                           setReferralFilter("all");
+                          setFolderFilter("all");
                           setDateRangePreset("all");
                           setDateStart("");
                           setDateEnd("");
@@ -5525,18 +6395,301 @@ export default function DofAdmin() {
 
           {/* List Card */}
           <div className="bg-white border border-slate-100 rounded-2xl overflow-hidden shadow-sm">
-            <div className="bg-slate-50 border-b border-slate-100 px-6 py-4 flex items-center justify-between">
-              <span className="text-sm font-bold text-slate-700">
-                {isSystemAdmin ? "Tüm DÖF Başvuruları" : `${activePanelUser?.department || "Birim"} DÖF Başvuruları`} ({filteredDofs.length})
-              </span>
-              <button 
-                onClick={fetchAllDofs}
-                className="p-1.5 rounded-lg text-slate-400 hover:text-indigo-600 hover:bg-slate-100 transition cursor-pointer"
-                title="Listeyi Yenile"
-              >
-                <RefreshCw className="h-4 w-4" />
-              </button>
+            <div className="bg-slate-50 border-b border-slate-100 px-6 py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <span className="text-sm font-bold text-slate-800">
+                  {isSystemAdmin ? "Tüm DÖF Başvuruları" : `${activePanelUser?.department || "Birim"} DÖF Başvuruları`}
+                </span>
+                <span className="text-xs text-slate-500 font-medium ml-2">
+                  (Listelenen: {filteredDofs.length} / Toplam: {totalCount})
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <button 
+                  onClick={fetchAllDofs}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-slate-600 hover:text-indigo-600 hover:bg-slate-100 text-xs font-bold transition cursor-pointer"
+                  title="Listeyi Yenile"
+                >
+                  <RefreshCw className="h-3.5 w-3.5" />
+                  <span>Yenile</span>
+                </button>
+              </div>
             </div>
+
+            {/* Hızlı Ayrım ve Filtre Çubuğu (Faaliyet Türü ve Durum/Kapanış Ayrımı) */}
+            <div className="p-4 bg-slate-50/50 border-b border-slate-100 space-y-3">
+              {/* 1. Faaliyet Türü Ayrımı (Düzeltici vs Önleyici) */}
+              <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+                <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500 shrink-0 w-28">
+                  Faaliyet Türü:
+                </span>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setTypeFilter("all")}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer flex items-center gap-1.5 ${
+                      typeFilter === "all"
+                        ? "bg-slate-900 text-white shadow-xs"
+                        : "bg-white text-slate-600 hover:bg-slate-100 border border-slate-200"
+                    }`}
+                  >
+                    <span>Tüm Türler</span>
+                    <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-slate-700 text-white font-mono">
+                      {totalCount}
+                    </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setTypeFilter(typeFilter === "düzeltici" ? "all" : "düzeltici")}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer flex items-center gap-1.5 ${
+                      typeFilter === "düzeltici"
+                        ? "bg-indigo-600 text-white shadow-md shadow-indigo-100"
+                        : "bg-white text-indigo-700 hover:bg-indigo-50 border border-indigo-200"
+                    }`}
+                  >
+                    <Wrench className="h-3.5 w-3.5" />
+                    <span>Düzeltici Faaliyetler</span>
+                    <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono ${typeFilter === "düzeltici" ? "bg-indigo-800 text-white" : "bg-indigo-100 text-indigo-800"}`}>
+                      {correctiveCount}
+                    </span>
+                    <span className="text-[9px] opacity-80 hidden md:inline">
+                      ({correctiveDaysSetting} İş Günü Planlama)
+                    </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setTypeFilter(typeFilter === "önleyici" ? "all" : "önleyici")}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer flex items-center gap-1.5 ${
+                      typeFilter === "önleyici"
+                        ? "bg-teal-700 text-white shadow-md shadow-teal-100"
+                        : "bg-white text-teal-800 hover:bg-teal-50 border border-teal-200"
+                    }`}
+                  >
+                    <ShieldCheck className="h-3.5 w-3.5" />
+                    <span>Önleyici Faaliyetler</span>
+                    <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono ${typeFilter === "önleyici" ? "bg-teal-900 text-white" : "bg-teal-100 text-teal-800"}`}>
+                      {preventiveCount}
+                    </span>
+                    <span className="text-[9px] opacity-80 hidden md:inline">
+                      ({preventiveDaysSetting} İş Günü Planlama)
+                    </span>
+                  </button>
+                </div>
+              </div>
+
+              {/* 2. Aşama ve Kapanış Bilgisi Ayrımı (Tamamlanan, Kapatılan, Açık) */}
+              <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+                <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500 shrink-0 w-28">
+                  Durum / Aşama:
+                </span>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setStatusFilter("all")}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-bold transition cursor-pointer ${
+                      statusFilter === "all"
+                        ? "bg-slate-800 text-white"
+                        : "bg-white text-slate-600 hover:bg-slate-100 border border-slate-200"
+                    }`}
+                  >
+                    Tümü
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setStatusFilter(statusFilter === "acik" ? "all" : "acik")}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-bold transition cursor-pointer flex items-center gap-1 ${
+                      statusFilter === "acik"
+                        ? "bg-amber-600 text-white"
+                        : "bg-white text-amber-800 hover:bg-amber-50 border border-amber-200"
+                    }`}
+                  >
+                    <span>🟢 Açık & İşlemde</span>
+                    <span className="text-[10px] font-mono opacity-80">({openCount})</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setStatusFilter(statusFilter === "cozuldu" ? "all" : "cozuldu")}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-bold transition cursor-pointer flex items-center gap-1 ${
+                      statusFilter === "cozuldu" || statusFilter === "tamamlandi"
+                        ? "bg-emerald-600 text-white shadow-xs"
+                        : "bg-white text-emerald-800 hover:bg-emerald-50 border border-emerald-200"
+                    }`}
+                  >
+                    <CheckCircle className="h-3 w-3" />
+                    <span>Tamamlanan (Çözüldü)</span>
+                    <span className="text-[10px] font-mono opacity-80">({resolvedCount})</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setStatusFilter(statusFilter === "kapali" ? "all" : "kapali")}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-bold transition cursor-pointer flex items-center gap-1 ${
+                      statusFilter === "kapali"
+                        ? "bg-slate-700 text-white"
+                        : "bg-white text-slate-700 hover:bg-slate-100 border border-slate-200"
+                    }`}
+                  >
+                    <span>🔒 Kapatılanlar (Tümü)</span>
+                    <span className="text-[10px] font-mono opacity-80">({closedCount})</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setStatusFilter(statusFilter === "reddedildi" ? "all" : "reddedildi")}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-bold transition cursor-pointer flex items-center gap-1 ${
+                      statusFilter === "reddedildi"
+                        ? "bg-rose-600 text-white"
+                        : "bg-white text-rose-700 hover:bg-rose-50 border border-rose-200"
+                    }`}
+                  >
+                    <XCircle className="h-3 w-3" />
+                    <span>Reddedilen / İptal</span>
+                    <span className="text-[10px] font-mono opacity-80">({rejectedCount})</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* 3. Klasör Ayrımı & Hızlı Klasör Çubuğu */}
+              {folders.length > 0 && (
+                <div className="flex flex-col sm:flex-row sm:items-center gap-2 pt-2 border-t border-slate-200/60">
+                  <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500 shrink-0 w-28 flex items-center gap-1">
+                    <FolderKanban className="h-3 w-3 text-indigo-500" />
+                    Klasörler:
+                  </span>
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => setFolderFilter("all")}
+                      className={`px-2.5 py-1 rounded-lg text-xs font-bold transition cursor-pointer ${
+                        folderFilter === "all"
+                          ? "bg-slate-900 text-white shadow-xs"
+                          : "bg-white text-slate-600 hover:bg-slate-100 border border-slate-200"
+                      }`}
+                    >
+                      Tümü
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setFolderFilter(folderFilter === "unassigned" ? "all" : "unassigned")}
+                      className={`px-2.5 py-1 rounded-lg text-xs font-bold transition cursor-pointer flex items-center gap-1 ${
+                        folderFilter === "unassigned"
+                          ? "bg-slate-700 text-white shadow-xs"
+                          : "bg-white text-slate-600 hover:bg-slate-100 border border-slate-200"
+                      }`}
+                    >
+                      <span>Klasörsüz</span>
+                      <span className="text-[10px] font-mono opacity-80">
+                        ({dofs.filter(d => !d.folderId).length})
+                      </span>
+                    </button>
+
+                    {folders.map(f => {
+                      const count = dofs.filter(d => d.folderId === f.id).length;
+                      const isSelected = folderFilter === f.id;
+                      return (
+                        <button
+                          key={f.id}
+                          type="button"
+                          onClick={() => setFolderFilter(isSelected ? "all" : f.id!)}
+                          className={`px-2.5 py-1 rounded-lg text-xs font-bold transition cursor-pointer flex items-center gap-1.5 ${
+                            isSelected
+                              ? "bg-indigo-600 text-white shadow-md shadow-indigo-100 ring-2 ring-indigo-400"
+                              : "bg-white text-indigo-900 hover:bg-indigo-50 border border-indigo-200"
+                          }`}
+                        >
+                          <Folder className="h-3 w-3 text-amber-500 shrink-0" />
+                          <span>{f.name}</span>
+                          <span className={`text-[10px] font-mono px-1.5 py-0.2 rounded-full ${isSelected ? "bg-indigo-900 text-white" : "bg-indigo-100 text-indigo-700"}`}>
+                            {count}
+                          </span>
+                        </button>
+                      );
+                    })}
+
+                    <button
+                      type="button"
+                      onClick={() => setAdminSubTab("folders")}
+                      className="px-2.5 py-1 text-[11px] font-bold text-indigo-600 hover:text-indigo-800 hover:underline flex items-center gap-1 ml-auto cursor-pointer"
+                    >
+                      <FolderPlus className="h-3.5 w-3.5" />
+                      Klasör Yönetimi
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Toplu Klasör & DÖF İşlem Barı (Seçilen DÖF'ler) */}
+            {selectedDofIds.length > 0 && (
+              <div className="bg-gradient-to-r from-indigo-50 to-blue-50 border-b border-indigo-200 p-3.5 px-6 flex flex-col sm:flex-row sm:items-center justify-between gap-3 animate-fade-in shadow-inner">
+                <div className="flex items-center gap-2.5">
+                  <div className="p-1.5 bg-indigo-600 text-white rounded-lg shadow-xs">
+                    <CheckSquare className="h-4 w-4" />
+                  </div>
+                  <div>
+                    <span className="text-xs font-bold text-indigo-950">
+                      {selectedDofIds.length} adet DÖF seçildi
+                    </span>
+                    <span className="text-[11px] text-indigo-700 font-medium ml-2 hidden md:inline">
+                      (Seçtiğiniz kayıtları klasöre taşıyabilir veya klasörden çıkarabilirsiniz)
+                    </span>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  <select
+                    value={bulkTargetFolderId}
+                    onChange={(e) => setBulkTargetFolderId(e.target.value)}
+                    className="bg-white border border-indigo-200 text-slate-800 rounded-xl px-3 py-1.5 text-xs font-semibold outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer shadow-xs"
+                  >
+                    <option value="">-- Hedef Klasörü Seçin --</option>
+                    {folders.map(f => (
+                      <option key={f.id} value={f.id}>
+                        📁 {f.name}
+                      </option>
+                    ))}
+                  </select>
+
+                  <button
+                    type="button"
+                    onClick={() => handleBulkMoveToFolder(bulkTargetFolderId)}
+                    disabled={!bulkTargetFolderId || isBulkMoving}
+                    className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 disabled:bg-slate-300 text-white text-xs font-bold rounded-xl transition cursor-pointer shadow-xs flex items-center gap-1.5"
+                  >
+                    {isBulkMoving ? (
+                      <span className="animate-spin h-3.5 w-3.5 border-2 border-white border-t-transparent rounded-full" />
+                    ) : (
+                      <FolderCheck className="h-3.5 w-3.5" />
+                    )}
+                    <span>Klasöre Taşı</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleBulkRemoveFromFolder}
+                    disabled={isBulkMoving}
+                    className="px-3 py-1.5 bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 text-xs font-bold rounded-xl transition cursor-pointer shadow-xs"
+                    title="Seçili DÖF'leri mevcut klasörlerinden çıkarır"
+                  >
+                    Klasörden Çıkar
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setSelectedDofIds([])}
+                    className="p-1.5 text-slate-500 hover:text-slate-800 hover:bg-slate-200/60 rounded-lg transition cursor-pointer ml-1"
+                    title="Seçimi Temizle"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+              </div>
+            )}
 
             {isLoading ? (
               <div className="flex flex-col items-center justify-center py-16">
@@ -5544,23 +6697,45 @@ export default function DofAdmin() {
                 <p className="text-slate-400 text-xs">Yükleniyor...</p>
               </div>
             ) : filteredDofs.length === 0 ? (
-              <div className="p-12 text-center text-slate-400 text-xs">
-                Filtrelere uygun DÖF kaydı bulunamadı.
+              <div className="p-12 text-center text-slate-400 text-xs space-y-2">
+                <p>Seçilen filtre kriterlerine uygun DÖF kaydı bulunamadı.</p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setTypeFilter("all");
+                    setStatusFilter("all");
+                    setSearchTerm("");
+                    setDeptFilter("all");
+                  }}
+                  className="inline-flex items-center gap-1 px-3 py-1.5 bg-indigo-50 text-indigo-700 font-bold rounded-lg text-xs hover:bg-indigo-100 transition cursor-pointer"
+                >
+                  Filtreleri Sıfırla
+                </button>
               </div>
             ) : (
               <div className="overflow-x-auto">
                 <table className="w-full text-left border-collapse text-xs font-sans">
                   <thead>
                     <tr className="bg-slate-50 border-b border-slate-100 text-slate-500 font-bold uppercase tracking-wider text-[10px]">
-                      <th className="p-4">Döf Adı</th>
+                      <th className="p-4 w-10 text-center" onClick={(e) => e.stopPropagation()}>
+                        <input
+                          type="checkbox"
+                          aria-label="Tümünü Seç / Seçimi Kaldır"
+                          checked={selectedDofIds.length === filteredDofs.length && filteredDofs.length > 0}
+                          onChange={handleToggleSelectAll}
+                          className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                        />
+                      </th>
+                      <th className="p-4">Döf Başvuru</th>
+                      <th className="p-4">Klasör</th>
+                      <th className="p-4">Faaliyet Türü</th>
+                      <th className="p-4">Durumu & Kapanış</th>
+                      <th className="p-4">Planlanan Termin</th>
                       <th className="p-4">Süre</th>
                       <th className="p-4">Aciliyet</th>
                       <th className="p-4">Risk Skoru</th>
-                      <th className="p-4">Sorumlu</th>
-                      <th className="p-4">İlişkili Departman</th>
-                      <th className="p-4">Son Tamamlanma Tarihi</th>
-                      <th className="p-4">DÖF Oluşturma Tarihi</th>
-                      <th className="p-4">Durumu</th>
+                      <th className="p-4">Sorumlu & Birim</th>
+                      <th className="p-4">Oluşturma</th>
                       <th className="p-4 text-center">İşlemler</th>
                     </tr>
                   </thead>
@@ -5578,19 +6753,190 @@ export default function DofAdmin() {
                         durationText = `${elapsedDays} Gün (Açık)`;
                       }
 
+                      // Target Completion Date Analysis
+                      let targetDateText = "-";
+                      let targetStatusTag: React.ReactNode = null;
+                      if (dof.targetCompletionDate) {
+                        try {
+                          const target = new Date(dof.targetCompletionDate);
+                          if (!isNaN(target.getTime())) {
+                            targetDateText = target.toLocaleDateString("tr-TR");
+                            if (dof.status === "cozuldu") {
+                              targetStatusTag = (
+                                <span className="text-[9px] font-bold text-emerald-700 flex items-center gap-0.5">
+                                  <Check className="h-2.5 w-2.5" /> Tamamlandı
+                                </span>
+                              );
+                            } else if (dof.status === "reddedildi") {
+                              targetStatusTag = (
+                                <span className="text-[9px] font-bold text-slate-400">
+                                  Kapatıldı
+                                </span>
+                              );
+                            } else {
+                              const today = new Date();
+                              today.setHours(0, 0, 0, 0);
+                              target.setHours(0, 0, 0, 0);
+                              const diffDays = Math.round((target.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+                              if (diffDays < 0) {
+                                targetStatusTag = (
+                                  <span className="text-[9px] font-extrabold text-rose-600 bg-rose-50 px-1.5 py-0.2 rounded border border-rose-200">
+                                    Termin Aşıldı ({Math.abs(diffDays)}g)
+                                  </span>
+                                );
+                              } else if (diffDays <= 2) {
+                                targetStatusTag = (
+                                  <span className="text-[9px] font-extrabold text-amber-700 bg-amber-50 px-1.5 py-0.2 rounded border border-amber-200">
+                                    Son {diffDays} Gün!
+                                  </span>
+                                );
+                              } else {
+                                targetStatusTag = (
+                                  <span className="text-[9px] font-medium text-slate-500">
+                                    Kalan: {diffDays} Gün
+                                  </span>
+                                );
+                              }
+                            }
+                          }
+                        } catch (e) {}
+                      }
+
                       return (
                         <tr
                           key={dof.id}
                           onClick={() => handleSelectDof(dof)}
                           className={`hover:bg-indigo-50/20 transition cursor-pointer ${
-                            selectedDof?.id === dof.id ? "bg-indigo-50/40 font-medium" : ""
+                            selectedDofIds.includes(dof.id!)
+                              ? "bg-indigo-50/60 font-medium"
+                              : selectedDof?.id === dof.id
+                              ? "bg-indigo-50/40 font-medium"
+                              : ""
                           }`}
                         >
-                          {/* Döf Adı */}
+                          {/* Seçim Checkbox */}
+                          <td className="p-4 w-10 text-center" onClick={(e) => e.stopPropagation()}>
+                            <input
+                              type="checkbox"
+                              aria-label={`DÖF ${dof.refNo} Seç`}
+                              checked={selectedDofIds.includes(dof.id!)}
+                              onChange={() => handleToggleSelectDof(dof.id!)}
+                              className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                            />
+                          </td>
+
+                          {/* Döf Başvuru */}
                           <td className="p-4">
                             <div className="flex flex-col gap-1">
                               <span className="font-mono text-[10px] font-bold text-indigo-600">{dof.refNo}</span>
                               <span className="font-semibold text-slate-900 line-clamp-1">{dof.title}</span>
+                            </div>
+                          </td>
+
+                          {/* Klasör Bilgisi & Hızlı Atama */}
+                          <td className="p-4" onClick={(e) => e.stopPropagation()}>
+                            <div className="flex flex-col gap-1">
+                              {dof.folderId ? (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-amber-50 text-amber-800 border border-amber-200/80 font-bold text-[10px] w-fit">
+                                  <Folder className="h-3 w-3 text-amber-600 shrink-0" />
+                                  <span className="truncate max-w-[110px]">{dof.folderName || "Klasörlü"}</span>
+                                </span>
+                              ) : (
+                                <span className="text-[10px] text-slate-400 font-medium italic">
+                                  Klasörsüz
+                                </span>
+                              )}
+                              <select
+                                value={dof.folderId || ""}
+                                onChange={(e) => handleAssignDofFolder(dof.id!, e.target.value)}
+                                className="text-[10px] bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 rounded p-1 outline-none cursor-pointer max-w-[120px]"
+                                title="Klasörü Değiştir veya Ata"
+                              >
+                                <option value="">Klasör Seç...</option>
+                                {folders.map(f => (
+                                  <option key={f.id} value={f.id}>{f.name}</option>
+                                ))}
+                              </select>
+                            </div>
+                          </td>
+
+                          {/* Faaliyet Türü (Düzeltici vs Önleyici Ayrımı) */}
+                          <td className="p-4">
+                            {dof.type === "düzeltici" ? (
+                              <div className="flex flex-col gap-0.5 items-start">
+                                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-indigo-50 border border-indigo-200/80 text-indigo-700 font-extrabold text-[10px] uppercase tracking-wide shadow-2xs">
+                                  <Wrench className="h-3 w-3 text-indigo-600" />
+                                  Düzeltici Faaliyet
+                                </span>
+                                <span className="text-[9px] text-slate-500 font-semibold pl-1">
+                                  Plan: {correctiveDaysSetting} İş Günü
+                                </span>
+                              </div>
+                            ) : (
+                              <div className="flex flex-col gap-0.5 items-start">
+                                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-teal-50 border border-teal-200/80 text-teal-800 font-extrabold text-[10px] uppercase tracking-wide shadow-2xs">
+                                  <ShieldCheck className="h-3 w-3 text-teal-600" />
+                                  Önleyici Faaliyet
+                                </span>
+                                <span className="text-[9px] text-slate-500 font-semibold pl-1">
+                                  Plan: {preventiveDaysSetting} İş Günü
+                                </span>
+                              </div>
+                            )}
+                          </td>
+
+                          {/* Durumu & Kapanış Bilgisi */}
+                          <td className="p-4">
+                            <div className="flex flex-col gap-1 items-start">
+                              {dof.status === "cozuldu" ? (
+                                <>
+                                  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-800 font-extrabold text-[10px] uppercase tracking-wide border border-emerald-300 shadow-2xs">
+                                    <CheckCircle className="h-3 w-3 text-emerald-600" />
+                                    Tamamlandı (Çözüldü)
+                                  </span>
+                                  <span className="text-[9px] text-emerald-700 font-bold pl-1 flex items-center gap-1">
+                                    🔒 Kapatıldı {dof.completionDays ? `• ${dof.completionDays} günde` : ""}
+                                  </span>
+                                </>
+                              ) : dof.status === "reddedildi" ? (
+                                <>
+                                  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-rose-100 text-rose-800 font-extrabold text-[10px] uppercase tracking-wide border border-rose-300 shadow-2xs">
+                                    <XCircle className="h-3 w-3 text-rose-600" />
+                                    Kapatıldı (Reddedildi)
+                                  </span>
+                                  <span className="text-[9px] text-rose-600 font-bold pl-1">
+                                    ⛔ Süreç Sonlandırıldı
+                                  </span>
+                                </>
+                              ) : dof.status === "inceleniyor" ? (
+                                <>
+                                  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-amber-100 text-amber-800 font-extrabold text-[10px] uppercase tracking-wide border border-amber-300 shadow-2xs">
+                                    <Clock className="h-3 w-3 text-amber-600 animate-spin" style={{ animationDuration: '4s' }} />
+                                    İnceleniyor (İşlemde)
+                                  </span>
+                                  <span className="text-[9px] text-amber-700 font-semibold pl-1">
+                                    🟢 Açık • Faaliyet Uygulanıyor
+                                  </span>
+                                </>
+                              ) : (
+                                <>
+                                  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-blue-100 text-blue-800 font-extrabold text-[10px] uppercase tracking-wide border border-blue-300 shadow-2xs">
+                                    <AlertTriangle className="h-3 w-3 text-blue-600" />
+                                    Yeni Başvuru
+                                  </span>
+                                  <span className="text-[9px] text-blue-700 font-semibold pl-1">
+                                    🟢 Açık • Değerlendirme Bekliyor
+                                  </span>
+                                </>
+                              )}
+                            </div>
+                          </td>
+
+                          {/* Planlanan Termin */}
+                          <td className="p-4">
+                            <div className="flex flex-col gap-0.5">
+                              <span className="text-slate-800 font-semibold">{targetDateText}</span>
+                              {targetStatusTag}
                             </div>
                           </td>
                           
@@ -5627,37 +6973,35 @@ export default function DofAdmin() {
                             </span>
                           </td>
                           
-                          {/* Sorumlu */}
-                          <td className="p-4 text-slate-600 font-medium">{dof.assignedUserName || "Atanmamış"}</td>
-                          
-                          {/* İlişkili Departman */}
-                          <td className="p-4 text-slate-600 font-medium">{dof.department}</td>
-                          
-                          {/* Son Tamamlanma Tarihi */}
-                          <td className="p-4 text-slate-600 font-medium">
-                            {dof.targetCompletionDate ? new Date(dof.targetCompletionDate).toLocaleDateString("tr-TR") : "-"}
+                          {/* Sorumlu & Birim */}
+                          <td className="p-4">
+                            <div className="flex flex-col gap-0.5">
+                              <span className="text-slate-800 font-semibold">{dof.assignedUserName || "Atanmamış"}</span>
+                              <span className="text-[10px] text-slate-400 font-medium">{dof.department}</span>
+                            </div>
                           </td>
                           
                           {/* DÖF Oluşturma Tarihi */}
                           <td className="p-4 text-slate-500">{formatDate(dof.createdAt)}</td>
-                          
-                          {/* Durumu */}
-                          <td className="p-4">
-                            <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full font-bold text-[10px] uppercase ${
-                              dof.status === "yeni" ? "bg-blue-100 text-blue-800" :
-                              dof.status === "inceleniyor" ? "bg-amber-100 text-amber-800" :
-                              dof.status === "cozuldu" ? "bg-emerald-100 text-emerald-800" : "bg-rose-100 text-rose-800"
-                            }`}>
-                              {dof.status === "yeni" ? "Yeni Başvuru" :
-                               dof.status === "inceleniyor" ? "İncelemede" :
-                               dof.status === "cozuldu" ? "Çözüldü" : "Reddedildi"}
-                            </span>
-                          </td>
 
-                          {/* Mobil QR / İşlem */}
+                          {/* İşlemler */}
                           <td className="p-4 text-center" onClick={(e) => e.stopPropagation()}>
                             <div className="flex items-center justify-center gap-1.5">
+                              {/* Yatık Çıktı Butonu */}
                               <button
+                                type="button"
+                                onClick={() => {
+                                  setLandscapeTargetDof(dof);
+                                  setShowLandscapeModal(true);
+                                }}
+                                className="p-1.5 bg-emerald-50 hover:bg-emerald-100 hover:text-emerald-800 text-emerald-700 rounded-lg transition cursor-pointer border border-emerald-200/60"
+                                title="Yatık Kağıt Çıktısı (Önce/Sonra & Çözüm Raporu)"
+                              >
+                                <Printer className="h-3.5 w-3.5" />
+                              </button>
+
+                              <button
+                                type="button"
                                 onClick={() => setSingleQrModalDof(dof)}
                                 className="p-1.5 bg-slate-100 hover:bg-amber-50 hover:text-amber-700 text-slate-600 rounded-lg transition cursor-pointer"
                                 title="Mobil QR Kodunu Görüntüle"
@@ -5751,6 +7095,31 @@ export default function DofAdmin() {
                       }`}>
                         {selectedDof.type === "düzeltici" ? "Düzeltici" : "Önleyici"}
                       </span>
+
+                      {/* Klasör Bilgisi ve Değiştirme */}
+                      <div className="flex items-center gap-1.5 ml-1">
+                        {selectedDof.folderName ? (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-50 text-amber-800 border border-amber-200">
+                            <Folder className="h-3 w-3 text-amber-600" />
+                            {selectedDof.folderName}
+                          </span>
+                        ) : (
+                          <span className="text-[11px] text-slate-400 bg-slate-100 px-2.5 py-0.5 rounded-full font-medium">
+                            Klasörsüz
+                          </span>
+                        )}
+                        <select
+                          value={selectedDof.folderId || ""}
+                          onChange={(e) => handleAssignDofFolder(selectedDof.id!, e.target.value)}
+                          className="text-xs bg-white border border-slate-200 text-slate-700 rounded-lg py-1 px-2 font-medium outline-none focus:border-indigo-500 cursor-pointer shadow-2xs"
+                          title="DÖF'ü Klasöre Taşı"
+                        >
+                          <option value="">📁 Klasöre Taşı...</option>
+                          {folders.map(f => (
+                            <option key={f.id} value={f.id}>{f.name}</option>
+                          ))}
+                        </select>
+                      </div>
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
@@ -5763,10 +7132,21 @@ export default function DofAdmin() {
                     </button>
                     <button
                       onClick={() => handleDownloadPdf(selectedDof)}
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 active:bg-indigo-200 text-indigo-700 font-bold rounded-xl text-xs transition cursor-pointer border border-indigo-200/50 mr-2"
-                      title="Şık PDF Raporu İndir"
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 active:bg-indigo-200 text-indigo-700 font-bold rounded-xl text-xs transition cursor-pointer border border-indigo-200/50"
+                      title="Standart PDF Raporu İndir"
                     >
                       <Download className="h-4 w-4" /> Raporu İndir
+                    </button>
+                    <button
+                      onClick={() => {
+                        setLandscapeTargetDof(selectedDof);
+                        setShowLandscapeModal(true);
+                      }}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 active:bg-emerald-200 text-emerald-800 font-bold rounded-xl text-xs transition cursor-pointer border border-emerald-200/70 mr-2"
+                      title="Yatık Kağıt Çıktısı Al (Önce/Sonra Fotoğraflı ve Çözüm Raporu)"
+                      id="header-landscape-print-btn"
+                    >
+                      <Printer className="h-4 w-4 text-emerald-600" /> Yatık Çıktı (Önce / Sonra)
                     </button>
                     {isSystemAdmin && (
                       <button
@@ -6409,18 +7789,18 @@ export default function DofAdmin() {
               initial={{ opacity: 0, scale: 0.95, y: 10 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.95, y: 10 }}
-              className="relative w-full max-w-md bg-white rounded-3xl shadow-2xl border border-slate-100 p-6 sm:p-7 overflow-hidden z-10"
+              className="relative w-full max-w-lg max-h-[90vh] bg-white rounded-3xl shadow-2xl border border-slate-100 p-6 sm:p-7 overflow-hidden z-10 flex flex-col"
             >
-              <div className="flex items-center justify-between pb-4 border-b border-slate-100 mb-5">
+              <div className="flex items-center justify-between pb-4 border-b border-slate-100 mb-4 shrink-0">
                 <div className="flex items-center gap-2">
                   <span className="p-1.5 rounded-lg bg-indigo-50 text-indigo-600">
                     <Settings className="h-4.5 w-4.5" />
                   </span>
                   <div>
                     <h3 className="text-sm font-bold text-slate-900">
-                      Program Parametre Ayarları
+                      Sistem & Parametre Ayarları
                     </h3>
-                    <p className="text-[10px] text-slate-400 font-medium">Yönetici Paneli Varsayılan Davranışları</p>
+                    <p className="text-[10px] text-slate-400 font-medium">Yönetici Paneli & DÖF Süre Davranışları (Sadece Yönetici)</p>
                   </div>
                 </div>
                 <button
@@ -6431,7 +7811,101 @@ export default function DofAdmin() {
                 </button>
               </div>
 
-              <div className="space-y-4">
+              <div className="space-y-4 overflow-y-auto pr-1">
+                {/* 0. DÖF Varsayılan Planlama Süreleri (Termin / İş Günü Ayarları) */}
+                <div className="bg-gradient-to-br from-amber-50/70 via-indigo-50/30 to-white border border-amber-200/80 rounded-2xl p-4 space-y-3 shadow-2xs">
+                  <div className="flex items-center justify-between border-b border-amber-200/50 pb-2">
+                    <div className="flex items-center gap-2">
+                      <span className="p-1.5 rounded-lg bg-amber-500 text-white font-mono font-bold text-xs">
+                        <Clock className="h-3.5 w-3.5" />
+                      </span>
+                      <div>
+                        <h4 className="text-xs font-bold text-slate-900">DÖF Varsayılan Planlama Süreleri</h4>
+                        <p className="text-[10px] text-slate-500">DÖF oluşturulduğu andan itibaren otomatik hesaplanan iş günü terminleri</p>
+                      </div>
+                    </div>
+                    <span className="text-[9px] font-bold bg-amber-100 text-amber-900 px-2 py-0.5 rounded-full">
+                      İş Günü
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {/* Önleyici Faaliyet Süresi */}
+                    <div className="space-y-1 bg-white p-3 rounded-xl border border-slate-200 focus-within:border-indigo-500 focus-within:ring-1 focus-within:ring-indigo-500/20 transition">
+                      <div className="flex items-center justify-between">
+                        <label className="text-[10px] font-bold text-slate-700 block">
+                          Önleyici Faaliyet
+                        </label>
+                        <span className="text-[9px] font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded">
+                          Varsayılan: 7
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="number"
+                          min="1"
+                          max="365"
+                          value={preventiveDaysSetting}
+                          onChange={(e) => setPreventiveDaysSetting(Math.max(1, Number(e.target.value) || 1))}
+                          className="w-full bg-slate-50 focus:bg-white border border-slate-200 focus:border-indigo-500 rounded-lg px-2.5 py-1.5 text-xs font-bold text-slate-800 outline-none transition"
+                        />
+                        <span className="text-xs font-semibold text-slate-500 shrink-0">İş Günü</span>
+                      </div>
+                      <p className="text-[9px] text-slate-400 leading-tight">
+                        Önleyici DÖF açıldığında otomatik hesaplanan termin süresi.
+                      </p>
+                    </div>
+
+                    {/* Düzenleyici / Düzeltici Faaliyet Süresi */}
+                    <div className="space-y-1 bg-white p-3 rounded-xl border border-slate-200 focus-within:border-indigo-500 focus-within:ring-1 focus-within:ring-indigo-500/20 transition">
+                      <div className="flex items-center justify-between">
+                        <label className="text-[10px] font-bold text-slate-700 block">
+                          Düzenleyici / Düzeltici
+                        </label>
+                        <span className="text-[9px] font-bold text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded">
+                          Varsayılan: 3
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="number"
+                          min="1"
+                          max="365"
+                          value={correctiveDaysSetting}
+                          onChange={(e) => setCorrectiveDaysSetting(Math.max(1, Number(e.target.value) || 1))}
+                          className="w-full bg-slate-50 focus:bg-white border border-slate-200 focus:border-indigo-500 rounded-lg px-2.5 py-1.5 text-xs font-bold text-slate-800 outline-none transition"
+                        />
+                        <span className="text-xs font-semibold text-slate-500 shrink-0">İş Günü</span>
+                      </div>
+                      <p className="text-[9px] text-slate-400 leading-tight">
+                        Düzeltici DÖF açıldığında otomatik hesaplanan termin süresi.
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Canlı Önizleme Kutusu */}
+                  <div className="bg-slate-50/80 border border-slate-100 rounded-xl p-2.5 text-[10px] text-slate-600 space-y-1">
+                    <div className="font-bold text-slate-700 flex items-center gap-1">
+                      <Calendar className="h-3 w-3 text-slate-500" /> Bugün Oluşturulan DÖF Termin Önizlemesi:
+                    </div>
+                    <div className="flex items-center justify-between text-slate-500">
+                      <span>• Önleyici Faaliyet ({preventiveDaysSetting} İş Günü):</span>
+                      <span className="font-mono font-bold text-indigo-700">
+                        {computeTargetCompletionDate(new Date(), "önleyici", preventiveDaysSetting)}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between text-slate-500">
+                      <span>• Düzenleyici Faaliyet ({correctiveDaysSetting} İş Günü):</span>
+                      <span className="font-mono font-bold text-amber-700">
+                        {computeTargetCompletionDate(new Date(), "düzeltici", correctiveDaysSetting)}
+                      </span>
+                    </div>
+                    <p className="text-[9px] text-slate-400 italic pt-0.5">
+                      * Cumartesi ve Pazar günleri iş günü hesabına dahil edilmez.
+                    </p>
+                  </div>
+                </div>
+
                 {/* 1. Default Sound Setting */}
                 <div className="space-y-1.5">
                   <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wide block">
@@ -6578,28 +8052,34 @@ export default function DofAdmin() {
               </div>
 
               {/* Action Buttons */}
-              <div className="flex items-center justify-between pt-5 border-t border-slate-100 mt-6 gap-3">
+              <div className="flex items-center justify-between pt-5 border-t border-slate-100 mt-6 gap-3 shrink-0">
                 <button
                   type="button"
-                  onClick={() => {
+                  onClick={async () => {
+                    setPreventiveDaysSetting(7);
+                    setCorrectiveDaysSetting(3);
                     setDefaultSoundSetting("on");
                     setDefaultTabSetting("dofs");
                     setDefaultStatusFilterSetting("all");
                     setDefaultNotificationSetting("on");
                     setIsPasscodeLoginPassive(false);
                     
-                    localStorage.removeItem("dof_admin_default_sound_setting");
-                    localStorage.removeItem("dof_admin_default_tab_setting");
-                    localStorage.removeItem("dof_admin_default_status_filter_setting");
-                    localStorage.removeItem("dof_admin_default_notification_setting");
-                    localStorage.removeItem("dof_admin_passcode_login_passive");
+                    await saveSystemSettings({
+                      preventiveActionDays: 7,
+                      correctiveActionDays: 3,
+                      defaultSoundSetting: "on",
+                      defaultTabSetting: "dofs",
+                      defaultStatusFilterSetting: "all",
+                      defaultNotificationSetting: "on",
+                      isPasscodeLoginPassive: false,
+                    });
                     
                     setIsMuted(false);
                     setIsSettingsOpen(false);
                   }}
                   className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-semibold rounded-lg transition cursor-pointer"
                 >
-                  Sıfırla
+                  Varsayılana Sıfırla
                 </button>
                 <div className="flex items-center gap-2">
                   <button
@@ -6611,12 +8091,19 @@ export default function DofAdmin() {
                   </button>
                   <button
                     type="button"
-                    onClick={() => {
-                      localStorage.setItem("dof_admin_default_sound_setting", defaultSoundSetting);
-                      localStorage.setItem("dof_admin_default_tab_setting", defaultTabSetting);
-                      localStorage.setItem("dof_admin_default_status_filter_setting", defaultStatusFilterSetting);
-                      localStorage.setItem("dof_admin_default_notification_setting", defaultNotificationSetting);
-                      localStorage.setItem("dof_admin_passcode_login_passive", isPasscodeLoginPassive ? "true" : "false");
+                    onClick={async () => {
+                      const prev = Number(preventiveDaysSetting) || 7;
+                      const corr = Number(correctiveDaysSetting) || 3;
+
+                      await saveSystemSettings({
+                        preventiveActionDays: prev,
+                        correctiveActionDays: corr,
+                        defaultSoundSetting: defaultSoundSetting as any,
+                        defaultTabSetting,
+                        defaultStatusFilterSetting,
+                        defaultNotificationSetting: defaultNotificationSetting as any,
+                        isPasscodeLoginPassive,
+                      });
                       
                       // Apply immediately
                       if (defaultSoundSetting === "on") {
@@ -6630,9 +8117,9 @@ export default function DofAdmin() {
 
                       setIsSettingsOpen(false);
                     }}
-                    className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold rounded-lg shadow-sm transition cursor-pointer"
+                    className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-lg shadow-sm transition cursor-pointer"
                   >
-                    Kaydet
+                    Ayarları Kaydet
                   </button>
                 </div>
               </div>
@@ -6869,6 +8356,16 @@ export default function DofAdmin() {
         isOpen={isAdminScannerOpen}
         onClose={() => setIsAdminScannerOpen(false)}
         onScanSuccess={handleAdminScanSuccess}
+      />
+
+      {/* Landscape DÖF Solution & Before/After Print Modal (A4 Yatık Format) */}
+      <DofLandscapePrintModal
+        isOpen={showLandscapeModal}
+        dof={landscapeTargetDof || selectedDof}
+        onClose={() => {
+          setShowLandscapeModal(false);
+          setLandscapeTargetDof(null);
+        }}
       />
     </>
   );

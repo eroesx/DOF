@@ -1,6 +1,7 @@
 import React from "react";
 import { Clock, Calendar, ChevronRight, CheckCircle2 } from "lucide-react";
 import { DofForm } from "../types";
+import { computeTargetCompletionDate, getRemainingBusinessDays } from "../lib/settings";
 
 interface DofUpcomingDeadlinesProps {
   dofs: DofForm[];
@@ -11,37 +12,17 @@ export const DofUpcomingDeadlines: React.FC<DofUpcomingDeadlinesProps> = ({ dofs
   const pendingDofsWithDeadlines = dofs
     .filter((d) => d.status === "yeni" || d.status === "inceleniyor")
     .map((d) => {
-      let createdDate = new Date();
-      if (d.createdAt) {
-        try {
-          if (typeof d.createdAt.toDate === "function") {
-            createdDate = d.createdAt.toDate();
-          } else if (d.createdAt.seconds !== undefined) {
-            createdDate = new Date(d.createdAt.seconds * 1000);
-          } else {
-            createdDate = new Date(d.createdAt);
-          }
-        } catch (e) {
-          console.error("Error parsing date: ", e);
-        }
-      }
-      const targetDays = d.type === "düzeltici" ? 7 : 14;
-      const terminDate = new Date(createdDate.getTime());
-      terminDate.setDate(terminDate.getDate() + targetDays);
-
-      const today = new Date();
-      // Clear hours to compare calendar days
-      today.setHours(0, 0, 0, 0);
-      const terminDateZero = new Date(terminDate.getTime());
-      terminDateZero.setHours(0, 0, 0, 0);
-
-      const diffTime = terminDateZero.getTime() - today.getTime();
-      const diffDays = Math.round(diffTime / (1000 * 60 * 60 * 24));
+      const targetDateStr = d.targetCompletionDate || computeTargetCompletionDate(d.createdAt, d.type);
+      const rem = getRemainingBusinessDays(targetDateStr);
+      const terminDate = new Date(targetDateStr);
 
       return {
         dof: d,
         terminDate,
-        diffDays,
+        diffDays: rem.days,
+        isOverdue: rem.isOverdue,
+        isToday: rem.isToday,
+        remText: rem.text,
       };
     })
     .sort((a, b) => a.diffDays - b.diffDays)

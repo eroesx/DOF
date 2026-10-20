@@ -18,7 +18,8 @@ interface VectorPosterOptions {
  */
 export const printElement = async (
   elementId: string,
-  docTitle: string = "DÖF QR Poster"
+  docTitle: string = "DÖF QR Poster",
+  orientation: "portrait" | "landscape" = "portrait"
 ): Promise<boolean> => {
   const element = document.getElementById(elementId);
   if (!element) {
@@ -76,8 +77,8 @@ export const printElement = async (
         ${stylesHtml}
         <style>
           @page {
-            size: A4 portrait;
-            margin: 10mm;
+            size: A4 ${orientation};
+            margin: ${orientation === "landscape" ? "6mm" : "10mm"};
           }
           * {
             -webkit-print-color-adjust: exact !important;
@@ -94,9 +95,9 @@ export const printElement = async (
           }
           .poster-print-wrapper {
             width: 100%;
-            max-width: 680px;
+            max-width: ${orientation === "landscape" ? "1060px" : "680px"};
             margin: 0 auto;
-            padding: 20px;
+            padding: ${orientation === "landscape" ? "8px" : "20px"};
             background: #ffffff;
             box-sizing: border-box;
           }

@@ -22,6 +22,7 @@ import { createDof, generateRefNo } from "../lib/db";
 import { DofForm, DofType } from "../types";
 import { compressImageToBase64 } from "../utils/imageCompressor";
 import { triggerManagerEmailNotification } from "../lib/notifications";
+import { computeTargetCompletionDate, getStoredSettings, syncSettingsFromFirestore } from "../lib/settings";
 
 interface DofSubmitFormProps {
   onGoToTrack: (refNo: string) => void;
@@ -76,6 +77,7 @@ export default function DofSubmitForm({ onGoToTrack, onShowQr }: DofSubmitFormPr
       }
     };
     fetchDepts();
+    syncSettingsFromFirestore().catch(() => {});
   }, []);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -143,6 +145,10 @@ export default function DofSubmitForm({ onGoToTrack, onShowQr }: DofSubmitFormPr
     setIsSubmitting(true);
     const refNo = generateRefNo();
 
+    const settings = getStoredSettings();
+    const plannedDays = type === "önleyici" ? settings.preventiveActionDays : settings.correctiveActionDays;
+    const computedTargetDate = computeTargetCompletionDate(new Date(), type, plannedDays);
+
     const dofData: any = {
       refNo,
       type,
@@ -152,7 +158,9 @@ export default function DofSubmitForm({ onGoToTrack, onShowQr }: DofSubmitFormPr
       reporterContact: reporterContact.trim() || "Belirtilmedi",
       description: description.trim(),
       status: "yeni",
-      riskLevel: "Orta"
+      riskLevel: "Orta",
+      targetCompletionDate: computedTargetDate,
+      completionDays: plannedDays,
     };
 
     if (proposedAction.trim()) {
@@ -161,6 +169,7 @@ export default function DofSubmitForm({ onGoToTrack, onShowQr }: DofSubmitFormPr
 
     if (image) {
       dofData.imageUrl = image;
+      dofData.beforeImageUrl = image;
     }
 
     try {

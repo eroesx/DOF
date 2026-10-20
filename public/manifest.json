@@ -1,0 +1,50 @@
+{
+  "id": "/",
+  "name": "DÖF Kalite Yönetim Sistemi",
+  "short_name": "DÖF Mobil",
+  "description": "Mobil uyumlu, QR destekli ISO 9001:2015 Düzeltici ve Önleyici Faaliyet (DÖF) Yönetim Sistemi",
+  "start_url": "/?mode=mobile",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "theme_color": "#4f46e5",
+  "background_color": "#f8fafc",
+  "categories": ["business", "productivity"],
+  "icons": [
+    {
+      "src": "/pwa-icon.svg",
+      "sizes": "192x192 512x512",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/pwa-icon.svg",
+      "sizes": "192x192 512x512",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Yeni DÖF Bildir",
+      "short_name": "DÖF Bildir",
+      "description": "Sahada hızlı yeni DÖF oluştur",
+      "url": "/?view=submit",
+      "icons": [{ "src": "/pwa-icon.svg", "sizes": "192x192" }]
+    },
+    {
+      "name": "DÖF Takip & Sorgula",
+      "short_name": "Takip",
+      "description": "DÖF durumunu sorgula",
+      "url": "/?view=track",
+      "icons": [{ "src": "/pwa-icon.svg", "sizes": "192x192" }]
+    },
+    {
+      "name": "Yönetim Paneli",
+      "short_name": "Panel",
+      "description": "DÖF Yönetim Paneline Geç",
+      "url": "/?view=admin",
+      "icons": [{ "src": "/pwa-icon.svg", "sizes": "192x192" }]
+    }
+  ]
+}

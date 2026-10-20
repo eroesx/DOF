@@ -14,6 +14,7 @@ import {
 } from "recharts";
 import { Clock, AlertTriangle, CheckCircle, TrendingUp, BarChart2, PieChart as PieIcon } from "lucide-react";
 import { DofForm } from "../types";
+import { computeTargetCompletionDate, getRemainingBusinessDays } from "../lib/settings";
 
 interface DofDeadlineSummaryChartProps {
   dofs: DofForm[];
@@ -22,43 +23,11 @@ interface DofDeadlineSummaryChartProps {
 export const DofDeadlineSummaryChart: React.FC<DofDeadlineSummaryChartProps> = ({ dofs }) => {
   const [chartType, setChartType] = useState<"bar" | "pie">("bar");
 
-  // Helper to determine remaining days
+  // Helper to determine remaining days using business days
   const getRemainingDays = (dof: DofForm): number => {
-    if (dof.targetCompletionDate) {
-      const targetDate = new Date(dof.targetCompletionDate);
-      const today = new Date();
-      targetDate.setHours(0, 0, 0, 0);
-      today.setHours(0, 0, 0, 0);
-      const diffMs = targetDate.getTime() - today.getTime();
-      return Math.round(diffMs / (1000 * 60 * 60 * 24));
-    }
-
-    // Default calculations if no targetCompletionDate
-    let createdDate = new Date();
-    if (dof.createdAt) {
-      try {
-        if (typeof dof.createdAt.toDate === "function") {
-          createdDate = dof.createdAt.toDate();
-        } else if (dof.createdAt.seconds !== undefined) {
-          createdDate = new Date(dof.createdAt.seconds * 1000);
-        } else {
-          createdDate = new Date(dof.createdAt);
-        }
-      } catch (e) {
-        // ignore
-      }
-    }
-    const targetDays = dof.type === "düzeltici" ? 7 : 14;
-    const terminDate = new Date(createdDate.getTime());
-    terminDate.setDate(terminDate.getDate() + targetDays);
-
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const terminDateZero = new Date(terminDate.getTime());
-    terminDateZero.setHours(0, 0, 0, 0);
-
-    const diffTime = terminDateZero.getTime() - today.getTime();
-    return Math.round(diffTime / (1000 * 60 * 60 * 24));
+    const targetDateStr = dof.targetCompletionDate || computeTargetCompletionDate(dof.createdAt, dof.type);
+    const rem = getRemainingBusinessDays(targetDateStr);
+    return rem.days;
   };
 
   // Categorize

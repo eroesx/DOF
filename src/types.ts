@@ -20,6 +20,8 @@ export interface DofForm {
   description: string;
   proposedAction?: string;
   imageUrl?: string; // base64 or URL
+  beforeImageUrl?: string; // Faaliyet Öncesi Fotoğraf (Önce)
+  afterImageUrl?: string; // Faaliyet Sonrası Fotoğraf (Sonra)
   status: DofStatus;
   adminFeedback?: string;
   createdAt: any; // Firestore Timestamp or ISO string
@@ -38,6 +40,8 @@ export interface DofForm {
   currentStep?: number;
   rootCauses?: string[]; // 5 Kök Neden Analizi (5 Whys)
   comments?: DofComment[];
+  folderId?: string; // Atanan klasörün ID'si
+  folderName?: string; // Atanan klasörün adı
 }
 
 export interface GeminiAnalysisResult {
@@ -71,6 +75,18 @@ export interface Department {
   referralUserId?: string;
   createdAt?: any;
   updatedAt?: any;
+}
+
+export interface DofFolder {
+  id?: string;
+  name: string;
+  description?: string;
+  color?: string; // örn: "indigo" | "emerald" | "amber" | "rose" | "blue" | "purple" | "slate"
+  icon?: string;
+  createdAt?: any;
+  updatedAt?: any;
+  createdByName?: string;
+  createdByEmail?: string;
 }
 
 

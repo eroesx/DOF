@@ -45,7 +45,10 @@ service cloud.firestore {
         && (!data.keys().hasAny(['riskLevel']) || (data.riskLevel is string && (data.riskLevel == 'Düşük' || data.riskLevel == 'Orta' || data.riskLevel == 'Yüksek')))
         && (!data.keys().hasAny(['targetCompletionDate']) || (data.targetCompletionDate is string && data.targetCompletionDate.size() <= 500))
         && (!data.keys().hasAny(['completionDays']) || (data.completionDays is int))
-        && (!data.keys().hasAny(['comments']) || (data.comments is list));
+        && (!data.keys().hasAny(['rootCauses']) || (data.rootCauses is list))
+        && (!data.keys().hasAny(['comments']) || (data.comments is list))
+        && (!data.keys().hasAny(['folderId']) || (data.folderId is string && data.folderId.size() <= 500))
+        && (!data.keys().hasAny(['folderName']) || (data.folderName is string && data.folderName.size() <= 1000));
     }
 
     // Helper to validate a PanelUser
@@ -119,6 +122,14 @@ service cloud.firestore {
 
     match /email_logs/{logId} {
       allow read, list, create: if true;
+    }
+
+    match /system_settings/{settingId} {
+      allow read, list, create, update, delete: if true;
+    }
+
+    match /dof_folders/{folderId} {
+      allow read, list, create, update, delete: if true;
     }
   }
 }

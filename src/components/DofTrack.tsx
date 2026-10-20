@@ -388,12 +388,58 @@ export default function DofTrack({ initialRefNo }: DofTrackProps) {
                 </div>
               )}
 
-              {/* Image attachment if exists */}
-              {dof.imageUrl && (
-                <div>
-                  <h5 className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-2">Eklenen Fotoğraf/Belge</h5>
-                  <div className="max-w-md border border-slate-100 rounded-xl overflow-hidden shadow-inner">
-                    <img src={dof.imageUrl} alt="Belge" className="w-full h-auto max-h-80 object-cover" />
+              {/* Image attachment / Before & After if exists */}
+              {(dof.beforeImageUrl || dof.afterImageUrl || dof.imageUrl) && (
+                <div className="space-y-3">
+                  <h5 className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+                    Faaliyet Öncesi ve Sonrası Durum Fotoğrafları (Önce & Sonra)
+                  </h5>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    {/* Önce */}
+                    <div className="border border-rose-200 bg-rose-50/20 rounded-xl p-3 space-y-1.5">
+                      <div className="flex items-center justify-between">
+                        <span className="px-2 py-0.5 bg-rose-100 text-rose-800 text-[10px] font-bold rounded">
+                          1. ÖNCE (İlk Durum)
+                        </span>
+                        <span className="text-[10px] text-slate-400">Problem Anı</span>
+                      </div>
+                      {(dof.beforeImageUrl || dof.imageUrl) ? (
+                        <div className="rounded-lg overflow-hidden border border-slate-200 bg-white aspect-video flex items-center justify-center">
+                          <img 
+                            src={dof.beforeImageUrl || dof.imageUrl} 
+                            alt="Önce" 
+                            className="w-full h-full object-contain max-h-56" 
+                          />
+                        </div>
+                      ) : (
+                        <div className="rounded-lg border border-dashed border-slate-200 p-4 text-center text-xs text-slate-400">
+                          Fotoğraf eklenmedi
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Sonra */}
+                    <div className="border border-emerald-200 bg-emerald-50/20 rounded-xl p-3 space-y-1.5">
+                      <div className="flex items-center justify-between">
+                        <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 text-[10px] font-bold rounded">
+                          2. SONRA (Çözülen Hal)
+                        </span>
+                        <span className="text-[10px] text-slate-400">Faaliyet Sonucu</span>
+                      </div>
+                      {dof.afterImageUrl ? (
+                        <div className="rounded-lg overflow-hidden border border-slate-200 bg-white aspect-video flex items-center justify-center">
+                          <img 
+                            src={dof.afterImageUrl} 
+                            alt="Sonra" 
+                            className="w-full h-full object-contain max-h-56" 
+                          />
+                        </div>
+                      ) : (
+                        <div className="rounded-lg border border-dashed border-slate-200 p-4 text-center text-xs text-slate-400">
+                          Faaliyet sonrası fotoğrafı henüz eklenmedi
+                        </div>
+                      )}
+                    </div>
                   </div>
                 </div>
               )}

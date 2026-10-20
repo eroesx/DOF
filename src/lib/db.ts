@@ -12,7 +12,7 @@ import {
   serverTimestamp
 } from "firebase/firestore";
 import { db, auth } from "../firebase";
-import { DofForm, PanelUser, Department } from "../types";
+import { DofForm, PanelUser, Department, DofFolder } from "../types";
 
 export enum OperationType {
   CREATE = "create",
@@ -326,6 +326,100 @@ export async function deleteDepartment(id: string): Promise<void> {
     await deleteDoc(doc(db, DEPARTMENTS_COLLECTION, id));
   } catch (error) {
     handleFirestoreError(error, OperationType.DELETE, path);
+  }
+}
+
+// ==========================================
+// DÖF Folders (Klasör Yönetimi - dof_folders)
+// ==========================================
+export const FOLDERS_COLLECTION = "dof_folders";
+
+export async function listFolders(): Promise<DofFolder[]> {
+  const path = FOLDERS_COLLECTION;
+  try {
+    const q = query(collection(db, FOLDERS_COLLECTION), orderBy("createdAt", "desc"));
+    const querySnapshot = await getDocs(q);
+    const list: DofFolder[] = [];
+    querySnapshot.forEach((doc) => {
+      const data = doc.data();
+      list.push({ id: doc.id, ...data } as DofFolder);
+    });
+    return list;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.LIST, path);
+    return [];
+  }
+}
+
+export async function createFolder(folderData: Omit<DofFolder, "id" | "createdAt" | "updatedAt">): Promise<string> {
+  const docRef = doc(collection(db, FOLDERS_COLLECTION));
+  const newId = docRef.id;
+
+  const dataToSave = {
+    ...folderData,
+    id: newId,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  };
+
+  try {
+    await setDoc(docRef, dataToSave);
+    return newId;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.CREATE, `${FOLDERS_COLLECTION}/${newId}`);
+    return "";
+  }
+}
+
+export async function updateFolder(id: string, updates: Partial<DofFolder>): Promise<void> {
+  const path = `${FOLDERS_COLLECTION}/${id}`;
+  try {
+    const docRef = doc(db, FOLDERS_COLLECTION, id);
+    await updateDoc(docRef, {
+      ...updates,
+      updatedAt: serverTimestamp(),
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, path);
+  }
+}
+
+export async function deleteFolder(id: string): Promise<void> {
+  const path = `${FOLDERS_COLLECTION}/${id}`;
+  try {
+    await deleteDoc(doc(db, FOLDERS_COLLECTION, id));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, path);
+  }
+}
+
+export async function moveDofsToFolder(dofIds: string[], folderId: string, folderName: string): Promise<void> {
+  for (const id of dofIds) {
+    try {
+      const docRef = doc(db, COLLECTION_NAME, id);
+      await updateDoc(docRef, {
+        folderId: folderId || "",
+        folderName: folderName || "",
+        updatedAt: serverTimestamp(),
+      });
+    } catch (err) {
+      console.error(`Error moving dof ${id} to folder:`, err);
+    }
+  }
+}
+
+export async function removeDofsFromFolder(dofIds: string[]): Promise<void> {
+  for (const id of dofIds) {
+    try {
+      const docRef = doc(db, COLLECTION_NAME, id);
+      await updateDoc(docRef, {
+        folderId: "",
+        folderName: "",
+        updatedAt: serverTimestamp(),
+      });
+    } catch (err) {
+      console.error(`Error removing dof ${id} from folder:`, err);
+    }
   }
 }
 

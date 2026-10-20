@@ -10,21 +10,36 @@ import {
   X,
   LogOut,
   Camera,
-  Smartphone
+  Smartphone,
+  Settings,
+  Home
 } from "lucide-react";
 import DofSubmitForm from "./components/DofSubmitForm";
 import DofTrack from "./components/DofTrack";
 import DofAdmin from "./components/DofAdmin";
 import DofQrGenerator from "./components/DofQrGenerator";
 import DofMobileEditor from "./components/DofMobileEditor";
+import DofMobilePortal from "./components/DofMobilePortal";
 import { DofQrScannerModal, ScanResult } from "./components/DofQrScannerModal";
 import { onAuthStateChanged } from "firebase/auth";
 import { auth, signOut } from "./firebase";
 
-type ViewTab = "submit" | "track" | "admin" | "qr" | "edit";
+type ViewTab = "portal" | "submit" | "track" | "admin" | "qr" | "edit";
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<ViewTab>("admin");
+  const [activeTab, setActiveTab] = useState<ViewTab>(() => {
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      const view = params.get("view");
+      if (view === "portal" || view === "submit" || view === "track" || view === "admin" || view === "qr" || view === "edit") {
+        return view as ViewTab;
+      }
+      if (params.get("mode") === "mobile" || window.innerWidth < 768) {
+        return "portal";
+      }
+    }
+    return "admin";
+  });
   const [initialTrackRef, setInitialTrackRef] = useState<string | null>(null);
   const [editRefNo, setEditRefNo] = useState<string | null>(null);
   const [editId, setEditId] = useState<string | null>(null);
@@ -35,14 +50,12 @@ export default function App() {
   const [isPasscodeAuthed, setIsPasscodeAuthed] = useState(false);
 
   const computeIsAdmin = (currentUser?: any) => {
-    const isPassive = localStorage.getItem("dof_admin_passcode_login_passive") === "true";
     const role = localStorage.getItem("dof_admin_user_role");
     const passcode = localStorage.getItem("dof_admin_passcode");
     const email = localStorage.getItem("dof_admin_authed_email")?.toLowerCase().trim();
     const currEmail = (currentUser || auth.currentUser)?.email?.toLowerCase().trim();
 
     return (
-      isPassive ||
       role === "admin" ||
       passcode === "admin" ||
       email === "gokhan.eroglu@gmail.com" ||
@@ -109,6 +122,8 @@ export default function App() {
       if (id) {
         setEditId(id);
       }
+    } else if (view === "portal" || params.get("mode") === "mobile") {
+      setActiveTab("portal");
     } else if (view === "submit") {
       setActiveTab("submit");
     } else if (view === "track") {
@@ -159,6 +174,7 @@ export default function App() {
   };
 
   const tabs = [
+    { id: "portal", label: "Giriş Portalı", icon: Home },
     { id: "submit", label: "Form Doldur", icon: FileEdit },
     { id: "track", label: "Durum Takip", icon: Search },
     { id: "admin", label: "Yönetim Paneli", icon: Lock },
@@ -175,7 +191,7 @@ export default function App() {
           <div className="flex items-center justify-between h-16">
             
             {/* Logo/Title */}
-            <div className="flex items-center gap-2 cursor-pointer" onClick={() => setActiveTab("submit")}>
+            <div className="flex items-center gap-2 cursor-pointer" onClick={() => setActiveTab("portal")}>
               <div className="p-2 bg-indigo-600 text-white rounded-xl shadow-md shadow-indigo-100">
                 <ShieldAlert className="h-5 w-5" />
               </div>
@@ -223,6 +239,24 @@ export default function App() {
                 <Camera className="h-4 w-4" />
                 QR Kod Tara
               </button>
+
+              {/* Ayarlar Button (Sadece Admin Görür) */}
+              {isAdmin && (
+                <button
+                  onClick={() => {
+                    setActiveTab("admin");
+                    setTimeout(() => {
+                      window.dispatchEvent(new CustomEvent("dof_open_settings"));
+                    }, 80);
+                  }}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-xl bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 transition cursor-pointer shadow-2xs"
+                  id="header-settings-btn"
+                  title="Sistem & Süre Parametre Ayarları (Sadece Yönetici)"
+                >
+                  <Settings className="h-4 w-4 text-slate-600" />
+                  <span>Ayarlar</span>
+                </button>
+              )}
 
               {/* Desktop Logout Button */}
               {(user || isPasscodePassive || isPasscodeAuthed) && (
@@ -316,6 +350,24 @@ export default function App() {
               );
             })}
 
+            {/* Mobile Ayarlar (Sadece Admin) */}
+            {isAdmin && (
+              <button
+                onClick={() => {
+                  setActiveTab("admin");
+                  setIsMobileMenuOpen(false);
+                  setTimeout(() => {
+                    window.dispatchEvent(new CustomEvent("dof_open_settings"));
+                  }, 80);
+                }}
+                className="w-full flex items-center gap-3 px-4 py-2.5 text-xs font-semibold rounded-lg text-slate-700 hover:bg-slate-50 transition cursor-pointer"
+                id="mobile-tab-settings"
+              >
+                <Settings className="h-4.5 w-4.5 text-slate-500" />
+                Sistem Ayarları (Admin)
+              </button>
+            )}
+
             {/* Mobile dropdown exit button */}
             {(user || isPasscodePassive || isPasscodeAuthed) && (
               <div className="border-t border-slate-100 pt-2 mt-2">
@@ -333,10 +385,17 @@ export default function App() {
       </header>
 
       {/* Main Container */}
-      <main className="flex-grow max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <main className="flex-grow max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8 pb-24 md:pb-8">
         
         {/* Dynamic Views */}
         <div className="w-full">
+          {activeTab === "portal" && (
+            <DofMobilePortal 
+              onNavigate={(tab) => setActiveTab(tab)}
+              onOpenScanner={() => setIsScannerModalOpen(true)}
+              onSearchRef={handleGoToTrack}
+            />
+          )}
           {activeTab === "submit" && (
             <DofSubmitForm onGoToTrack={handleGoToTrack} onShowQr={handleShowQr} />
           )}
@@ -348,7 +407,7 @@ export default function App() {
           )}
           {activeTab === "qr" && (
             isAdmin ? (
-              <DofQrGenerator onClose={() => setActiveTab("submit")} />
+              <DofQrGenerator onClose={() => setActiveTab("portal")} />
             ) : (
               <div className="bg-white border border-slate-100 rounded-3xl p-10 text-center max-w-md mx-auto my-12 shadow-md space-y-4">
                 <div className="p-3 bg-rose-50 text-rose-600 rounded-full w-12 h-12 mx-auto flex items-center justify-center border border-rose-100">
@@ -359,10 +418,10 @@ export default function App() {
                   Afiş ve QR Kod oluşturma alanına sadece <strong>Yönetici (Admin)</strong> yetkisine sahip kullanıcılar erişebilir.
                 </p>
                 <button
-                  onClick={() => setActiveTab("submit")}
+                  onClick={() => setActiveTab("portal")}
                   className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition cursor-pointer"
                 >
-                  Form Ekranına Dön
+                  Giriş Ekranına Dön
                 </button>
               </div>
             )
@@ -386,6 +445,66 @@ export default function App() {
         />
 
       </main>
+
+      {/* Ergonomic Mobile Bottom Navigation Bar (Visible only on mobile devices) */}
+      <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-slate-200/90 px-3 py-1.5 flex justify-around items-center shadow-2xl pb-[calc(env(safe-area-inset-bottom)+0.35rem)] print:hidden">
+        <button
+          onClick={() => setActiveTab("portal")}
+          className={`flex flex-col items-center gap-1 py-1 px-2.5 rounded-xl transition cursor-pointer ${
+            activeTab === "portal" ? "text-indigo-600 font-bold" : "text-slate-400 hover:text-slate-600"
+          }`}
+          id="mobile-bottom-portal"
+        >
+          <Home className="h-5 w-5" />
+          <span className="text-[10px]">Giriş</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab("submit")}
+          className={`flex flex-col items-center gap-1 py-1 px-2.5 rounded-xl transition cursor-pointer ${
+            activeTab === "submit" ? "text-indigo-600 font-bold" : "text-slate-400 hover:text-slate-600"
+          }`}
+          id="mobile-bottom-submit"
+        >
+          <FileEdit className="h-5 w-5" />
+          <span className="text-[10px]">Bildir</span>
+        </button>
+
+        {/* Central Prominent QR Scan Button */}
+        <button
+          onClick={() => setIsScannerModalOpen(true)}
+          className="flex flex-col items-center -mt-5 transition transform active:scale-95 cursor-pointer"
+          title="Kamera ile QR Tara"
+          id="mobile-bottom-qr-btn"
+        >
+          <div className="w-12 h-12 rounded-full bg-gradient-to-tr from-indigo-600 to-indigo-500 text-white flex items-center justify-center shadow-lg shadow-indigo-300 ring-4 ring-white">
+            <Camera className="h-6 w-6" />
+          </div>
+          <span className="text-[10px] font-bold text-indigo-600 mt-0.5">QR Tara</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab("track")}
+          className={`flex flex-col items-center gap-1 py-1 px-2.5 rounded-xl transition cursor-pointer ${
+            activeTab === "track" ? "text-indigo-600 font-bold" : "text-slate-400 hover:text-slate-600"
+          }`}
+          id="mobile-bottom-track"
+        >
+          <Search className="h-5 w-5" />
+          <span className="text-[10px]">Takip</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab("admin")}
+          className={`flex flex-col items-center gap-1 py-1 px-2.5 rounded-xl transition cursor-pointer ${
+            activeTab === "admin" ? "text-indigo-600 font-bold" : "text-slate-400 hover:text-slate-600"
+          }`}
+          id="mobile-bottom-admin"
+        >
+          <Lock className="h-5 w-5" />
+          <span className="text-[10px]">Panel</span>
+        </button>
+      </nav>
 
       {/* Footer (Hidden during printing) */}
       <footer className="bg-white border-t border-slate-100 py-6 mt-12 print:hidden">
