@@ -12,7 +12,25 @@ export interface SystemSettings {
   defaultStatusFilterSetting: string;
   defaultNotificationSetting: "on" | "off";
   isPasscodeLoginPassive: boolean;
+  isKvkkMaskingEnabled: boolean;
 }
+
+export function isKvkkActive(): boolean {
+  if (typeof window === "undefined") return false;
+  return localStorage.getItem("dof_admin_kvkk_masking") === "true";
+}
+
+export function maskKvkkText(
+  text?: string | null,
+  isKvkkEnabled = false,
+  fallback = "-"
+): string {
+  if (isKvkkEnabled || isKvkkActive()) {
+    return "*** Gizli (KVKK) ***";
+  }
+  return text?.trim() ? text : fallback;
+}
+
 
 /**
  * Başlangıç tarihine verilen iş günü (Pazartesi-Cuma) kadar ekler.
@@ -149,13 +167,17 @@ export function getStoredSettings(): SystemSettings {
       (localStorage.getItem("dof_admin_default_sound_setting") as any) || "on",
     defaultTabSetting:
       localStorage.getItem("dof_admin_default_tab_setting") || "dofs",
-    defaultStatusFilterSetting:
-      localStorage.getItem("dof_admin_default_status_filter_setting") || "all",
+    defaultStatusFilterSetting: (() => {
+      const saved = localStorage.getItem("dof_admin_default_status_filter_setting");
+      return saved && saved !== "all" ? saved : "acik";
+    })(),
     defaultNotificationSetting:
       (localStorage.getItem("dof_admin_default_notification_setting") as any) ||
       "on",
     isPasscodeLoginPassive:
       localStorage.getItem("dof_admin_passcode_login_passive") === "true",
+    isKvkkMaskingEnabled:
+      localStorage.getItem("dof_admin_kvkk_masking") === "true",
   };
 }
 
@@ -193,15 +215,28 @@ export async function syncSettingsFromFirestore(): Promise<SystemSettings> {
         );
       }
       if (data.defaultStatusFilterSetting) {
+        const eff = data.defaultStatusFilterSetting !== "all" ? data.defaultStatusFilterSetting : "acik";
         localStorage.setItem(
           "dof_admin_default_status_filter_setting",
-          data.defaultStatusFilterSetting
+          eff
         );
       }
       if (data.defaultNotificationSetting) {
         localStorage.setItem(
           "dof_admin_default_notification_setting",
           data.defaultNotificationSetting
+        );
+      }
+      if (typeof data.isKvkkMaskingEnabled === "boolean") {
+        localStorage.setItem(
+          "dof_admin_kvkk_masking",
+          data.isKvkkMaskingEnabled ? "true" : "false"
+        );
+      }
+      if (typeof data.isPasscodeLoginPassive === "boolean") {
+        localStorage.setItem(
+          "dof_admin_passcode_login_passive",
+          data.isPasscodeLoginPassive ? "true" : "false"
         );
       }
     }
@@ -258,6 +293,12 @@ export async function saveSystemSettings(
     localStorage.setItem(
       "dof_admin_passcode_login_passive",
       settings.isPasscodeLoginPassive ? "true" : "false"
+    );
+  }
+  if (typeof settings.isKvkkMaskingEnabled === "boolean") {
+    localStorage.setItem(
+      "dof_admin_kvkk_masking",
+      settings.isKvkkMaskingEnabled ? "true" : "false"
     );
   }
 

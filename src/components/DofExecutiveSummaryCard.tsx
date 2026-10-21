@@ -42,7 +42,7 @@ export const DofExecutiveSummaryCard: React.FC<DofExecutiveSummaryCardProps> = (
   correctiveDays = 3,
   preventiveDays = 7,
   onFilterClick,
-  statusFilter = "all",
+  statusFilter = "acik",
   typeFilter = "all",
 }) => {
   // Calculations

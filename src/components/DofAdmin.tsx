@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { 
   Lock, 
@@ -6,6 +6,7 @@ import {
   LogOut,
   SlidersHorizontal, 
   Search, 
+  Filter,
   CheckCircle, 
   XCircle, 
   Clock, 
@@ -60,7 +61,11 @@ import {
   FolderPlus,
   FolderCheck,
   CheckSquare,
-  Square
+  Square,
+  Database,
+  Server,
+  HardDrive,
+  Table
 } from "lucide-react";
 import { DofSingleQrModal } from "./DofSingleQrModal";
 import { DofQrScannerModal, ScanResult } from "./DofQrScannerModal";
@@ -106,6 +111,7 @@ import { DashboardChartsGrid } from "./DashboardChartsGrid";
 import DofLandscapePrintModal from "./DofLandscapePrintModal";
 import DofExecutiveSummaryCard from "./DofExecutiveSummaryCard";
 import DofFolderManager from "./DofFolderManager";
+import DofDatabaseSettings from "./DofDatabaseSettings";
 import { compressImageToBase64 } from "../utils/imageCompressor";
 import {
   computeTargetCompletionDate,
@@ -201,9 +207,12 @@ export default function DofAdmin() {
   const [isLoading, setIsLoading] = useState(false);
   const [selectedDof, setSelectedDof] = useState<DofForm | null>(null);
 
-  // Filters
+  // Filters (Varsayılan olarak Açık & İşlemde DÖF'ler getirilir)
   const [searchTerm, setSearchTerm] = useState("");
-  const [statusFilter, setStatusFilter] = useState<string>(() => localStorage.getItem("dof_admin_default_status_filter_setting") || "all");
+  const [statusFilter, setStatusFilter] = useState<string>(() => {
+    const saved = localStorage.getItem("dof_admin_default_status_filter_setting");
+    return saved && saved !== "all" ? saved : "acik";
+  });
   const [typeFilter, setTypeFilter] = useState<string>("all");
   const [deptFilter, setDeptFilter] = useState<string>("all");
   const [isFiltersExpanded, setIsFiltersExpanded] = useState(false);
@@ -224,9 +233,9 @@ export default function DofAdmin() {
   const [isCopied, setIsCopied] = useState(false);
 
   // Admin View Sub-Tab
-  const [adminSubTab, setAdminSubTab] = useState<"dashboard" | "dofs" | "folders" | "new_dof" | "users" | "departments" | "workflow" | "reports" | "logs" | "remote">(() => {
+  const [adminSubTab, setAdminSubTab] = useState<"dashboard" | "dofs" | "folders" | "new_dof" | "users" | "departments" | "workflow" | "reports" | "logs" | "remote" | "database">(() => {
     const saved = localStorage.getItem("dof_admin_default_tab_setting");
-    if (saved && ["dashboard", "dofs", "folders", "new_dof", "users", "departments", "workflow", "reports", "logs", "remote"].includes(saved)) {
+    if (saved && ["dashboard", "dofs", "folders", "new_dof", "users", "departments", "workflow", "reports", "logs", "remote", "database"].includes(saved)) {
       return saved as any;
     }
     return "dashboard";
@@ -337,10 +346,13 @@ export default function DofAdmin() {
     }
   }, [isAuthorized]);
 
-  // Email notifications state
+  // Email and Audit logs state & filters
   const [emailLogs, setEmailLogs] = useState<any[]>([]);
   const [isEmailLogsLoading, setIsEmailLogsLoading] = useState(false);
   const [expandedLogId, setExpandedLogId] = useState<string | null>(null);
+  const [logTypeFilter, setLogTypeFilter] = useState<string>("all");
+  const [logUserFilter, setLogUserFilter] = useState<string>("all");
+  const [logSearchTerm, setLogSearchTerm] = useState<string>("");
 
   // Active panel user state & filters
   const [activePanelUser, setActivePanelUser] = useState<PanelUser | null>(null);
@@ -440,8 +452,9 @@ export default function DofAdmin() {
   const [dofToDelete, setDofToDelete] = useState<DofForm | null>(null);
   const [isDeletingDof, setIsDeletingDof] = useState(false);
   
-  // Program Parametre Ayarları States
+  // Program Parametre & Veritabanı Ayarları States
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [settingsModalTab, setSettingsModalTab] = useState<"parameters" | "database">("parameters");
   const [preventiveDaysSetting, setPreventiveDaysSetting] = useState<number>(() => {
     const val = Number(localStorage.getItem("dof_admin_preventive_days"));
     return !isNaN(val) && val > 0 ? val : 7;
@@ -457,7 +470,8 @@ export default function DofAdmin() {
     return localStorage.getItem("dof_admin_default_tab_setting") || "dofs";
   });
   const [defaultStatusFilterSetting, setDefaultStatusFilterSetting] = useState<string>(() => {
-    return localStorage.getItem("dof_admin_default_status_filter_setting") || "all";
+    const saved = localStorage.getItem("dof_admin_default_status_filter_setting");
+    return saved && saved !== "all" ? saved : "acik";
   });
   const [defaultNotificationSetting, setDefaultNotificationSetting] = useState<"on" | "off" | string>(() => {
     return localStorage.getItem("dof_admin_default_notification_setting") || "on";
@@ -465,6 +479,19 @@ export default function DofAdmin() {
   const [isPasscodeLoginPassive, setIsPasscodeLoginPassive] = useState<boolean>(() => {
     return localStorage.getItem("dof_admin_passcode_login_passive") === "true";
   });
+  const [isKvkkMaskingEnabled, setIsKvkkMaskingEnabled] = useState<boolean>(() => {
+    return localStorage.getItem("dof_admin_kvkk_masking") === "true";
+  });
+
+  const getMaskedReporterName = (name?: string) => {
+    if (isKvkkMaskingEnabled) return "*** Gizli (KVKK) ***";
+    return name || "Anonim / Belirtilmemiş";
+  };
+
+  const getMaskedReporterContact = (contact?: string) => {
+    if (isKvkkMaskingEnabled) return "*** Gizli (KVKK) ***";
+    return contact || "-";
+  };
 
   const [isMuted, setIsMuted] = useState<boolean>(() => {
     const setting = localStorage.getItem("dof_admin_default_sound_setting") || "on";
@@ -533,12 +560,22 @@ export default function DofAdmin() {
       setCorrectiveDaysSetting(s.correctiveActionDays);
       if (s.defaultSoundSetting) setDefaultSoundSetting(s.defaultSoundSetting);
       if (s.defaultTabSetting) setDefaultTabSetting(s.defaultTabSetting);
-      if (s.defaultStatusFilterSetting) setDefaultStatusFilterSetting(s.defaultStatusFilterSetting);
+      if (s.defaultStatusFilterSetting) {
+        const eff = s.defaultStatusFilterSetting !== "all" ? s.defaultStatusFilterSetting : "acik";
+        setDefaultStatusFilterSetting(eff);
+      }
       if (s.defaultNotificationSetting) setDefaultNotificationSetting(s.defaultNotificationSetting);
       setIsPasscodeLoginPassive(s.isPasscodeLoginPassive);
+      if (typeof s.isKvkkMaskingEnabled === "boolean") {
+        setIsKvkkMaskingEnabled(s.isKvkkMaskingEnabled);
+      }
     });
 
-    const handleOpenSettingsEvent = () => {
+    const handleOpenSettingsEvent = (e?: Event) => {
+      const customEvt = e as CustomEvent<{ tab?: "parameters" | "database" }>;
+      if (customEvt?.detail?.tab) {
+        setSettingsModalTab(customEvt.detail.tab);
+      }
       setIsSettingsOpen(true);
     };
     window.addEventListener("dof_open_settings", handleOpenSettingsEvent);
@@ -559,7 +596,7 @@ export default function DofAdmin() {
       const isSystemAdmin = activePanelUser.role === "admin" || 
                             activePanelUser.email?.toLowerCase().trim() === "gokhan.eroglu@gmail.com";
       if (!isSystemAdmin) {
-        if (adminSubTab === "users" || adminSubTab === "departments" || adminSubTab === "remote" || adminSubTab === "logs") {
+        if (adminSubTab === "users" || adminSubTab === "departments" || adminSubTab === "remote" || adminSubTab === "logs" || adminSubTab === "database") {
           setAdminSubTab("dashboard");
         }
       }
@@ -1442,6 +1479,95 @@ export default function DofAdmin() {
   const isAdminOrEditor = activePanelUser?.role === "admin" || activePanelUser?.role === "editor";
   const showAllDofsTab = true;
 
+  // Unique list of persons involved in logs: from panelUsers + distinct actors/recipients from emailLogs
+  const logPersons = useMemo(() => {
+    const map = new Map<string, { email: string; name: string; role?: string }>();
+    
+    // Add all registered panel users
+    panelUsers.forEach((u) => {
+      if (u.email) {
+        const key = u.email.toLowerCase().trim();
+        map.set(key, { email: key, name: u.name || key.split("@")[0], role: u.role });
+      }
+    });
+
+    // Add any actors or recipients from emailLogs
+    emailLogs.forEach((l) => {
+      if (l.actorEmail) {
+        const key = l.actorEmail.toLowerCase().trim();
+        if (!map.has(key)) {
+          map.set(key, { email: key, name: l.actorName || key.split("@")[0], role: l.actorRole });
+        }
+      }
+      if (l.recipient) {
+        const key = l.recipient.toLowerCase().trim();
+        if (!map.has(key)) {
+          map.set(key, { email: key, name: key.split("@")[0] });
+        }
+      }
+      if (l.to) {
+        const key = l.to.toLowerCase().trim();
+        if (!map.has(key)) {
+          map.set(key, { email: key, name: key.split("@")[0] });
+        }
+      }
+    });
+
+    return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name, "tr"));
+  }, [panelUsers, emailLogs]);
+
+  // Filtered email and audit logs based on user, type, and search term
+  const filteredEmailLogs = useMemo(() => {
+    return emailLogs.filter((log) => {
+      // 1. User/Person filter
+      if (logUserFilter !== "all") {
+        const target = logUserFilter.toLowerCase().trim();
+        const actorEmailMatch = (log.actorEmail || "").toLowerCase().trim() === target;
+        const actorNameMatch = (log.actorName || "").toLowerCase().trim() === target;
+        const recipientMatch = (log.recipient || "").toLowerCase().trim() === target;
+        const toMatch = (log.to || "").toLowerCase().trim() === target;
+        const bodyMatch = (log.body || "").toLowerCase().includes(target);
+        if (!actorEmailMatch && !actorNameMatch && !recipientMatch && !toMatch && !bodyMatch) {
+          return false;
+        }
+      }
+
+      // 2. Type filter
+      if (logTypeFilter !== "all") {
+        if (logTypeFilter === "dof_deleted") {
+          if (log.type !== "dof_deleted") return false;
+        } else if (logTypeFilter === "notifications") {
+          if (log.type === "dof_deleted") return false;
+        } else if (logTypeFilter === "new_dof") {
+          if (log.type !== "new_dof" && log.type !== "dof_created_notification") return false;
+        } else if (logTypeFilter === "status_change") {
+          if (log.type !== "status_update" && log.type !== "dof_status_changed_notification") return false;
+        }
+      }
+
+      // 3. Search term
+      if (logSearchTerm.trim()) {
+        const q = logSearchTerm.toLowerCase().trim();
+        const matchesRef = (log.dofRefNo || log.refNo || "").toLowerCase().includes(q);
+        const matchesSubject = (log.subject || "").toLowerCase().includes(q);
+        const matchesActor = (log.actorName || "").toLowerCase().includes(q) || (log.actorEmail || "").toLowerCase().includes(q);
+        const matchesRecipient = (log.recipient || log.to || "").toLowerCase().includes(q);
+        const matchesBody = (log.body || "").toLowerCase().includes(q);
+        if (!matchesRef && !matchesSubject && !matchesActor && !matchesRecipient && !matchesBody) {
+          return false;
+        }
+      }
+
+      return true;
+    });
+  }, [emailLogs, logUserFilter, logTypeFilter, logSearchTerm]);
+
+  // Count deleted DÖFs in logs
+  const deletedLogsCount = useMemo(() => {
+    return emailLogs.filter((l) => l.type === "dof_deleted").length;
+  }, [emailLogs]);
+
+
   const filteredWorkflowDofs = visibleDofs.filter((d) => {
     // If the user is not an admin/editor, they can only see their own tasks
     if (!isAdminOrEditor) {
@@ -1617,7 +1743,7 @@ export default function DofAdmin() {
       y += 8;
       drawMetaRow("Departman", dof.department || "-", "Sorumlu Kisi", dof.assignedUserName || "Atanmamis", y);
       y += 8;
-      drawMetaRow("Bildiren Kisi", dof.reporterName || "-", "Bildiren Iletisim", dof.reporterContact || "-", y);
+      drawMetaRow("Bildiren Kisi", getMaskedReporterName(dof.reporterName), "Bildiren Iletisim", getMaskedReporterContact(dof.reporterContact), y);
       y += 8;
       drawMetaRow("Aciliyet Derecesi", riskInfo.level || "Orta", "Risk Skoru", `${riskInfo.score} / 15`, y);
       y += 14;
@@ -3266,7 +3392,10 @@ export default function DofAdmin() {
             <div className="grid grid-cols-2 gap-y-4 gap-x-2 text-xs">
               <div>
                 <span className="text-slate-400 font-medium block">Oluşturan</span>
-                <span className="font-bold text-slate-800 text-sm mt-0.5 block">{dof.reporterName}</span>
+                <span className="font-bold text-slate-800 text-sm mt-0.5 block">{getMaskedReporterName(dof.reporterName)}</span>
+                {dof.reporterContact && (
+                  <span className="text-[11px] text-slate-500 font-mono mt-0.5 block">{getMaskedReporterContact(dof.reporterContact)}</span>
+                )}
               </div>
               <div>
                 <span className="text-slate-400 font-medium block">Kaynak Departman</span>
@@ -3580,7 +3709,7 @@ export default function DofAdmin() {
               <tbody className="divide-y divide-slate-100">
                 <tr className="hover:bg-slate-50/50 transition">
                   <td className="p-3 font-mono text-[10px] text-slate-500">{formatDate(dof.createdAt)}</td>
-                  <td className="p-3 text-slate-700 font-semibold">{dof.reporterName}</td>
+                  <td className="p-3 text-slate-700 font-semibold">{getMaskedReporterName(dof.reporterName)}</td>
                   <td className="p-3 capitalize text-indigo-600 font-bold">{dof.type}</td>
                   <td className="p-3 text-slate-600">Sistem Girişi</td>
                   <td className="p-3">
@@ -3807,6 +3936,22 @@ export default function DofAdmin() {
     setIsDeletingDof(true);
     try {
       const refNo = dofToDelete.refNo;
+      const actorName = activePanelUser?.name || user?.displayName || (user?.email ? user.email.split('@')[0] : "Süper Yönetici");
+      const actorEmail = activePanelUser?.email || user?.email || localStorage.getItem("dof_admin_authed_email") || "gokhan.eroglu@gmail.com";
+      const actorRole = activePanelUser?.role || localStorage.getItem("dof_admin_user_role") || "admin";
+
+      // Denetim günlüğüne kim tarafından silindiğini kaydet
+      try {
+        const { logDofDeletion } = await import("../lib/notifications");
+        await logDofDeletion(dofToDelete, {
+          name: actorName,
+          email: actorEmail,
+          role: actorRole,
+        });
+      } catch (logErr) {
+        console.warn("Could not log dof deletion:", logErr);
+      }
+
       await deleteDof(dofToDelete.id);
       
       setDofs(prev => prev.filter(d => d.id !== dofToDelete.id));
@@ -3815,8 +3960,9 @@ export default function DofAdmin() {
       }
       
       await fetchAllDofs();
+      fetchLogs();
       setDofToDelete(null);
-      setWorkflowNotice(`✓ DÖF #${refNo} kaydı başarıyla silindi.`);
+      setWorkflowNotice(`✓ DÖF #${refNo} kaydı ${actorName} tarafından başarıyla silindi.`);
       setTimeout(() => setWorkflowNotice(null), 4000);
     } catch (err) {
       console.error("DÖF silme hatası:", err);
@@ -4262,7 +4408,7 @@ export default function DofAdmin() {
                     {activeNotification.title}
                   </h4>
                   <p className="text-[10px] text-slate-400 line-clamp-2">
-                    {activeNotification.department} • {activeNotification.reporterName}
+                    {activeNotification.department} • {getMaskedReporterName(activeNotification.reporterName)}
                   </p>
 
                   <div className="pt-2 flex gap-2">
@@ -4472,6 +4618,9 @@ export default function DofAdmin() {
                   {/* Tüm DÖF'ler Tab */}
                   <button
                     onClick={() => {
+                      if (statusFilter === "all") {
+                        setStatusFilter("acik");
+                      }
                       setAdminSubTab("dofs");
                       setIsMobileSidebarOpen(false);
                     }}
@@ -4643,6 +4792,27 @@ export default function DofAdmin() {
                       >
                         <Mail className="h-5 w-5 shrink-0" />
                         {isExpanded && <span className="truncate flex-1">Sistem Logları</span>}
+                      </button>
+
+                      <button
+                        onClick={() => {
+                          setAdminSubTab("database");
+                          setIsMobileSidebarOpen(false);
+                        }}
+                        className={`flex items-center gap-3 px-3 py-2.5 text-xs font-bold rounded-xl transition cursor-pointer text-left relative ${
+                          adminSubTab === "database"
+                            ? "bg-indigo-600 text-white shadow-md shadow-indigo-950/60"
+                            : "text-slate-400 hover:bg-slate-800 hover:text-slate-200"
+                        } ${!isExpanded ? "justify-center" : ""}`}
+                        title={!isExpanded ? "Veritabanı & Tablolar" : undefined}
+                      >
+                        <Database className="h-5 w-5 shrink-0 text-emerald-400" />
+                        {isExpanded && (
+                          <div className="flex items-center justify-between flex-1 truncate">
+                            <span className="truncate">Veritabanı & Tablolar</span>
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse ml-1" />
+                          </div>
+                        )}
                       </button>
                     </>
                   )}
@@ -5905,63 +6075,185 @@ export default function DofAdmin() {
             })()}
 
             {adminSubTab === "logs" && (
-              <div className="bg-white border border-slate-100 rounded-3xl p-5 sm:p-6 shadow-md space-y-6 animate-fade-in" id="email-notifications-section">
+              <div className="bg-white border border-slate-100 rounded-3xl p-5 sm:p-6 shadow-md space-y-6 animate-fade-in" id="system-audit-logs-section">
+                {/* Header */}
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-50 pb-5">
                   <div>
                     <h2 className="text-xl font-display font-bold text-slate-900 tracking-tight flex items-center gap-2">
                       <span className="p-1.5 rounded-lg bg-indigo-50 text-indigo-600">
-                        <Mail className="h-5 w-5" />
+                        <Shield className="h-5 w-5" />
                       </span>
-                      Otomatik E-posta Bildirim Geçmişi (Firebase Cloud Functions)
+                      Sistem Logları & İşlem Denetim Günlüğü
                     </h2>
-                    <p className="text-xs text-slate-400 mt-1 max-w-xl leading-relaxed">
-                      Yeni bir DÖF kaydı oluşturulduğunda veya durumu güncellendiğinde ilgili birime ve bildirim sahibine otomatik olarak iletilen e-posta bildirimlerinin detaylı takip günlüğü.
+                    <p className="text-xs text-slate-400 mt-1 max-w-2xl leading-relaxed">
+                      Silinen DÖF kayıtları, kim tarafından silindiği bilgisi, yetkili bazlı işlem geçmişi ve otomatik sistem e-posta bildirimlerinin detaylı denetim günlüğü.
                     </p>
                   </div>
 
                   <button
                     onClick={fetchLogs}
                     disabled={isEmailLogsLoading}
-                    className="inline-flex items-center justify-center gap-1.5 px-4 py-2 bg-indigo-50 hover:bg-indigo-100 disabled:bg-slate-50 text-indigo-700 font-semibold rounded-xl text-xs border border-indigo-100 transition cursor-pointer self-start sm:self-auto shrink-0"
+                    className="inline-flex items-center justify-center gap-1.5 px-4 py-2 bg-indigo-50 hover:bg-indigo-100 disabled:bg-slate-50 text-indigo-700 font-semibold rounded-xl text-xs border border-indigo-100 transition cursor-pointer self-start sm:self-auto shrink-0 shadow-2xs"
                   >
                     <RefreshCw className={`h-3.5 w-3.5 ${isEmailLogsLoading ? "animate-spin" : ""}`} />
                     Günlüğü Yenile
                   </button>
                 </div>
 
+                {/* Quick Stats Badges */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  <div className="bg-slate-50 border border-slate-150 rounded-2xl p-3.5">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wide block">Toplam Günlük Kaydı</span>
+                    <span className="text-xl font-black text-slate-800 mt-0.5 block">{emailLogs.length}</span>
+                  </div>
+                  <div className="bg-rose-50/60 border border-rose-200/60 rounded-2xl p-3.5">
+                    <span className="text-[10px] font-bold text-rose-500 uppercase tracking-wide block">🗑️ Silinen DÖF Kayıtları</span>
+                    <span className="text-xl font-black text-rose-700 mt-0.5 block">{deletedLogsCount}</span>
+                  </div>
+                  <div className="bg-indigo-50/60 border border-indigo-200/60 rounded-2xl p-3.5">
+                    <span className="text-[10px] font-bold text-indigo-500 uppercase tracking-wide block">✉️ E-posta & Bildirimler</span>
+                    <span className="text-xl font-black text-indigo-700 mt-0.5 block">{emailLogs.length - deletedLogsCount}</span>
+                  </div>
+                  <div className="bg-emerald-50/60 border border-emerald-200/60 rounded-2xl p-3.5">
+                    <span className="text-[10px] font-bold text-emerald-600 uppercase tracking-wide block">👥 Kayıtlı Yetkili Sayısı</span>
+                    <span className="text-xl font-black text-emerald-800 mt-0.5 block">{logPersons.length}</span>
+                  </div>
+                </div>
+
+                {/* Advanced Filter Bar */}
+                <div className="bg-slate-50/70 border border-slate-200 rounded-2xl p-4 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-1.5 text-xs font-bold text-slate-700">
+                      <Filter className="h-4 w-4 text-indigo-600" />
+                      <span>Log & Denetim Filtreleri</span>
+                    </div>
+                    {(logUserFilter !== "all" || logTypeFilter !== "all" || logSearchTerm !== "") && (
+                      <button
+                        onClick={() => {
+                          setLogUserFilter("all");
+                          setLogTypeFilter("all");
+                          setLogSearchTerm("");
+                        }}
+                        className="inline-flex items-center gap-1 text-[11px] font-bold text-rose-600 hover:text-rose-800 transition cursor-pointer"
+                      >
+                        <XCircle className="h-3.5 w-3.5" />
+                        Filtreleri Temizle
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    {/* 1. İlgili Kişi / İşlemi Yapan Filtresi */}
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wide block mb-1">
+                        İlgili Kişi / İşlemi Yapan
+                      </label>
+                      <select
+                        value={logUserFilter}
+                        onChange={(e) => setLogUserFilter(e.target.value)}
+                        className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs font-semibold text-slate-800 outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer shadow-2xs"
+                      >
+                        <option value="all">👤 Tüm Kişiler & Yetkililer (Filtresiz)</option>
+                        {logPersons.map((p) => (
+                          <option key={p.email} value={p.email}>
+                            👤 {p.name} ({p.email}) {p.role ? `[${p.role.toUpperCase()}]` : ""}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {/* 2. İşlem / Log Türü */}
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wide block mb-1">
+                        İşlem / Log Türü
+                      </label>
+                      <select
+                        value={logTypeFilter}
+                        onChange={(e) => setLogTypeFilter(e.target.value)}
+                        className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs font-semibold text-slate-800 outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer shadow-2xs"
+                      >
+                        <option value="all">Tüm İşlemler</option>
+                        <option value="dof_deleted">🗑️ Silinen DÖF Kayıtları ({deletedLogsCount})</option>
+                        <option value="notifications">✉️ E-posta & Sistem Bildirimleri</option>
+                        <option value="new_dof">🆕 Yeni Kayıt Bildirimleri</option>
+                        <option value="status_change">🔄 Durum Güncellemeleri</option>
+                      </select>
+                    </div>
+
+                    {/* 3. Arama Çubuğu */}
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wide block mb-1">
+                        Metin / Ref No Arama
+                      </label>
+                      <div className="relative">
+                        <Search className="h-4 w-4 text-slate-400 absolute left-3 top-2.5" />
+                        <input
+                          type="text"
+                          value={logSearchTerm}
+                          onChange={(e) => setLogSearchTerm(e.target.value)}
+                          placeholder="Ref No, başlık, kişi veya e-posta..."
+                          className="w-full bg-white border border-slate-200 rounded-xl pl-9 pr-3 py-2 text-xs outline-none focus:ring-2 focus:ring-indigo-500 text-slate-800 shadow-2xs"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Table or Empty State */}
                 {isEmailLogsLoading && emailLogs.length === 0 ? (
                   <div className="flex flex-col items-center justify-center py-20 text-slate-400">
                     <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600 mb-2" />
-                    <span className="text-xs font-semibold">Bildirim kayıtları yükleniyor...</span>
+                    <span className="text-xs font-semibold">Bildirim ve denetim kayıtları yükleniyor...</span>
                   </div>
-                ) : emailLogs.length === 0 ? (
+                ) : filteredEmailLogs.length === 0 ? (
                   <div className="bg-slate-50 border border-slate-200 border-dashed rounded-2xl p-16 text-center text-slate-400">
                     <div className="p-3.5 bg-white border border-slate-100 rounded-full shadow-sm mb-4 inline-block">
-                      <Mail className="h-8 w-8 text-slate-300 animate-pulse" />
+                      <Search className="h-8 w-8 text-slate-300" />
                     </div>
-                    <h3 className="font-bold text-slate-700 text-sm">Gönderilmiş E-posta Bulunmuyor</h3>
+                    <h3 className="font-bold text-slate-700 text-sm">Eşleşen Günlük Kaydı Bulunamadı</h3>
                     <p className="text-xs text-slate-400 mt-1.5 max-w-sm mx-auto leading-relaxed">
-                      Sistemde henüz otomatik tetiklenen bir e-posta bildirimi kaydı yok. Yeni bir DÖF kaydı oluşturarak veya mevcut bir kaydın durumunu güncelleyerek anlık e-posta akışını başlatabilirsiniz!
+                      Seçilen kişi veya filtrelere ait herhangi bir işlem kaydı bulunamadı. Filtreleri sıfırlayarak tüm kayıtlara ulaşabilirsiniz.
                     </p>
+                    <button
+                      onClick={() => {
+                        setLogUserFilter("all");
+                        setLogTypeFilter("all");
+                        setLogSearchTerm("");
+                      }}
+                      className="mt-4 px-4 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold rounded-xl text-xs transition cursor-pointer"
+                    >
+                      Filtreleri Sıfırla
+                    </button>
                   </div>
                 ) : (
                   <div className="space-y-4">
+                    <div className="flex items-center justify-between px-1 text-xs text-slate-500">
+                      <span>Gösterilen Kayıt: <strong className="text-slate-800 font-bold">{filteredEmailLogs.length}</strong> / {emailLogs.length}</span>
+                      {logUserFilter !== "all" && (
+                        <span className="inline-flex items-center gap-1 font-bold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-lg border border-indigo-100">
+                          <User className="h-3 w-3" />
+                          Seçili Yetkili: {logPersons.find(p => p.email === logUserFilter)?.name || logUserFilter}
+                        </span>
+                      )}
+                    </div>
+
                     <div className="overflow-x-auto rounded-xl border border-slate-100">
                       <table className="w-full text-left border-collapse text-xs font-sans">
                         <thead>
                           <tr className="bg-slate-50 border-b border-slate-100 text-slate-500 font-bold uppercase tracking-wider text-[10px]">
                             <th className="p-4">DÖF Ref No</th>
-                            <th className="p-4">Bildirim Türü</th>
-                            <th className="p-4">Alıcı E-posta</th>
+                            <th className="p-4">İşlem / Tür</th>
+                            <th className="p-4">İşlemi Yapan / İlgili Kişi</th>
                             <th className="p-4">Konu Başlığı</th>
-                            <th className="p-4">Gönderim Tarihi</th>
+                            <th className="p-4">İşlem Tarihi</th>
                             <th className="p-4">Durum</th>
                             <th className="p-4 text-center">İşlemler</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-50">
-                          {emailLogs.map((log) => {
+                          {filteredEmailLogs.map((log) => {
                             const isExpanded = expandedLogId === log.id;
+                            const isDeletion = log.type === "dof_deleted";
                             const formatLogDate = (sentAt: any) => {
                               if (!sentAt) return "-";
                               let date: Date;
@@ -5972,54 +6264,164 @@ export default function DofAdmin() {
                               } else {
                                 date = new Date(sentAt);
                               }
-                              return date.toLocaleString("tr-TR");
+                              return isNaN(date.getTime()) ? String(sentAt) : date.toLocaleString("tr-TR");
                             };
+
+                            const actorDisplayName = log.actorName || (log.actorEmail ? log.actorEmail.split("@")[0] : null);
+                            const actorDisplayEmail = log.actorEmail || log.recipient || log.to || "-";
 
                             return (
                               <React.Fragment key={log.id}>
-                                <tr className="hover:bg-slate-50/50 transition">
-                                  <td className="p-4 font-mono font-bold text-slate-900">{log.dofRefNo}</td>
-                                  <td className="p-4">
-                                    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full font-bold text-[9px] uppercase border ${
-                                      log.type === "new_dof" ? "bg-blue-50 text-blue-700 border-blue-100" : "bg-purple-50 text-purple-700 border-purple-100"
-                                    }`}>
-                                      {log.type === "new_dof" ? "Yeni Kayıt" : "Durum Güncelleme"}
-                                    </span>
+                                <tr className={`hover:bg-slate-50/50 transition ${isDeletion ? "bg-rose-50/20" : ""}`}>
+                                  <td className="p-4 font-mono font-bold text-slate-900">
+                                    {log.dofRefNo || log.refNo || "-"}
                                   </td>
-                                  <td className="p-4 font-mono text-slate-600">{log.to}</td>
-                                  <td className="p-4 font-medium text-slate-800">{log.subject}</td>
-                                  <td className="p-4 text-slate-400 font-mono">{formatLogDate(log.sentAt)}</td>
                                   <td className="p-4">
-                                    <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-100 font-bold text-[10px] uppercase">
-                                      <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-                                      GÖNDERİLDİ
-                                    </span>
+                                    {isDeletion ? (
+                                      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full font-black text-[10px] uppercase bg-rose-100 text-rose-800 border border-rose-300 shadow-2xs">
+                                        <Trash2 className="h-3 w-3 text-rose-600" />
+                                        DÖF Silindi
+                                      </span>
+                                    ) : log.type === "new_dof" || log.type === "dof_created_notification" ? (
+                                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full font-bold text-[9px] uppercase border bg-blue-50 text-blue-700 border-blue-100">
+                                        Yeni Kayıt
+                                      </span>
+                                    ) : (
+                                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full font-bold text-[9px] uppercase border bg-purple-50 text-purple-700 border-purple-100">
+                                        Durum Güncelleme
+                                      </span>
+                                    )}
+                                  </td>
+                                  <td className="p-4">
+                                    <div className="flex flex-col">
+                                      <span className="font-bold text-slate-800 flex items-center gap-1">
+                                        <User className="h-3.5 w-3.5 text-indigo-500 shrink-0" />
+                                        {actorDisplayName || actorDisplayEmail.split("@")[0]}
+                                      </span>
+                                      <span className="font-mono text-[10px] text-slate-400 pl-4.5 truncate max-w-[200px]">
+                                        {actorDisplayEmail}
+                                      </span>
+                                      {log.actorRole && (
+                                        <span className="text-[9px] font-bold text-indigo-600 uppercase pl-4.5 mt-0.5">
+                                          [{log.actorRole}]
+                                        </span>
+                                      )}
+                                    </div>
+                                  </td>
+                                  <td className="p-4 font-medium text-slate-800 max-w-xs truncate">
+                                    {log.subject || log.dofTitle || "-"}
+                                  </td>
+                                  <td className="p-4 text-slate-400 font-mono text-[11px] whitespace-nowrap">
+                                    {formatLogDate(log.sentAt)}
+                                  </td>
+                                  <td className="p-4">
+                                    {isDeletion ? (
+                                      <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-rose-100 text-rose-700 border border-rose-200 font-bold text-[10px] uppercase">
+                                        <span className="h-1.5 w-1.5 rounded-full bg-rose-500" />
+                                        SİLİNDİ
+                                      </span>
+                                    ) : (
+                                      <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-100 font-bold text-[10px] uppercase">
+                                        <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                                        GÖNDERİLDİ
+                                      </span>
+                                    )}
                                   </td>
                                   <td className="p-4 text-center">
                                     <button
                                       onClick={() => setExpandedLogId(isExpanded ? null : log.id)}
-                                      className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg transition text-xs font-semibold cursor-pointer"
+                                      className={`inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg transition text-xs font-semibold cursor-pointer ${
+                                        isExpanded
+                                          ? "bg-slate-800 text-white"
+                                          : isDeletion
+                                          ? "bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200"
+                                          : "bg-slate-100 hover:bg-slate-200 text-slate-700"
+                                      }`}
                                     >
                                       <Eye className="h-3.5 w-3.5" />
-                                      {isExpanded ? "Kapat" : "Önizle"}
+                                      {isExpanded ? "Kapat" : isDeletion ? "Silen Kişi & Detay" : "Önizle"}
                                     </button>
                                   </td>
                                 </tr>
+
                                 {isExpanded && (
                                   <tr>
                                     <td colSpan={7} className="p-4 bg-slate-50 border-t border-b border-slate-100">
-                                      <div className="space-y-3">
-                                        <div className="flex items-center justify-between">
-                                          <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
-                                            📧 Gönderilen HTML E-posta Canlı Önizlemesi
-                                          </span>
-                                          <span className="text-xs font-mono text-slate-400">Kayıt ID: {log.id}</span>
+                                      {isDeletion ? (
+                                        <div className="bg-white border-2 border-rose-200 rounded-2xl p-5 shadow-xs space-y-4">
+                                          <div className="flex items-center justify-between border-b border-rose-100 pb-3">
+                                            <div className="flex items-center gap-2 text-rose-700 font-black text-sm uppercase tracking-wide">
+                                              <AlertTriangle className="h-5 w-5 text-rose-600" />
+                                              <span>DÖF Silme İşlemi Denetim Kaydı</span>
+                                            </div>
+                                            <span className="text-[11px] font-mono text-slate-400">Log ID: {log.id}</span>
+                                          </div>
+
+                                          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 bg-rose-50/50 p-3.5 rounded-xl border border-rose-100 text-xs">
+                                            <div>
+                                              <span className="text-[10px] font-bold text-rose-500 uppercase block">Silme İşlemini Yapan</span>
+                                              <span className="font-extrabold text-slate-800 mt-0.5 block">
+                                                {log.actorName || "Süper Yönetici"}
+                                              </span>
+                                              <span className="text-[10px] text-slate-500 font-mono block">
+                                                {log.actorEmail || "-"}
+                                              </span>
+                                            </div>
+                                            <div>
+                                              <span className="text-[10px] font-bold text-rose-500 uppercase block">Yetki Düzeyi</span>
+                                              <span className="font-bold text-slate-800 mt-0.5 block uppercase">
+                                                {log.actorRole || "admin"}
+                                              </span>
+                                            </div>
+                                            <div>
+                                              <span className="text-[10px] font-bold text-rose-500 uppercase block">Silinme Zamanı</span>
+                                              <span className="font-bold text-slate-800 mt-0.5 block font-mono">
+                                                {formatLogDate(log.sentAt)}
+                                              </span>
+                                            </div>
+                                            <div>
+                                              <span className="text-[10px] font-bold text-rose-500 uppercase block">Silinen Referans No</span>
+                                              <span className="font-mono font-black text-rose-700 mt-0.5 block">
+                                                #{log.dofRefNo || log.refNo || "-"}
+                                              </span>
+                                            </div>
+                                          </div>
+
+                                          {log.body && (
+                                            <div>
+                                              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
+                                                İşlem Detayları & Silinen Veri Özeti
+                                              </span>
+                                              <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 font-mono text-xs whitespace-pre-wrap leading-relaxed text-slate-700">
+                                                {log.body}
+                                              </div>
+                                            </div>
+                                          )}
                                         </div>
-                                        <div 
-                                          className="bg-white border border-slate-100 rounded-xl p-6 shadow-inner max-h-[500px] overflow-auto"
-                                          dangerouslySetInnerHTML={{ __html: log.html }}
-                                        />
-                                      </div>
+                                      ) : (
+                                        <div className="space-y-3">
+                                          <div className="flex items-center justify-between">
+                                            <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+                                              📧 E-posta Bildirim İçeriği & Detayı
+                                            </span>
+                                            <span className="text-xs font-mono text-slate-400">Kayıt ID: {log.id}</span>
+                                          </div>
+                                          {log.html ? (
+                                            <div 
+                                              className="bg-white border border-slate-100 rounded-xl p-6 shadow-inner max-h-[500px] overflow-auto"
+                                              dangerouslySetInnerHTML={{ __html: log.html }}
+                                            />
+                                          ) : log.body ? (
+                                            <div className="bg-white border border-slate-100 rounded-xl p-5 font-mono text-xs whitespace-pre-wrap text-slate-700 leading-relaxed">
+                                              {log.body}
+                                            </div>
+                                          ) : (
+                                            <div className="bg-white border border-slate-100 rounded-xl p-5 text-slate-400 text-xs italic">
+                                              Kayıtlı metin içeriği bulunmuyor.
+                                            </div>
+                                          )}
+                                        </div>
+                                      )}
                                     </td>
                                   </tr>
                                 )}
@@ -6199,6 +6601,24 @@ export default function DofAdmin() {
               </div>
             )}
 
+            {adminSubTab === "database" && (
+              <div className="space-y-6 animate-fade-in" id="admin-database-tables-section">
+                <DofDatabaseSettings
+                  dofsCount={dofs.length}
+                  departmentsCount={departments.length}
+                  panelUsersCount={panelUsers.length}
+                  foldersCount={folders.length}
+                  passwordRequestsCount={passwordRequests.length}
+                  emailLogsCount={emailLogs.length}
+                  sampleDof={dofs[0]}
+                  onRefreshAll={() => {
+                    fetchLogs();
+                    fetchAllUsers();
+                  }}
+                />
+              </div>
+            )}
+
         {adminSubTab === "dofs" && (
           <div className="grid grid-cols-1 gap-6">
             
@@ -6245,8 +6665,8 @@ export default function DofAdmin() {
                           onChange={(e) => setStatusFilter(e.target.value)}
                           className="w-full bg-slate-50 border border-slate-200 rounded-lg p-1.5 text-xs outline-none focus:border-indigo-500 font-medium"
                         >
-                          <option value="all">Tümü</option>
-                          <option value="acik">🟢 Açık (Yeni & İnceleme)</option>
+                          <option value="acik">🟢 Açık & İşlemde (Yeni & İnceleniyor)</option>
+                          <option value="all">Tümü (Filtresiz)</option>
                           <option value="kapali">🔴 Kapalı (Çözüldü & Red)</option>
                           <option value="bekleyen">Bekleyenler</option>
                           <option value="yeni">Yeni Başvuru</option>
@@ -6374,7 +6794,7 @@ export default function DofAdmin() {
                       <button
                         onClick={() => {
                           setSearchTerm("");
-                          setStatusFilter("all");
+                          setStatusFilter("acik");
                           setTypeFilter("all");
                           setDeptFilter("all");
                           setReferralFilter("all");
@@ -6703,7 +7123,7 @@ export default function DofAdmin() {
                   type="button"
                   onClick={() => {
                     setTypeFilter("all");
-                    setStatusFilter("all");
+                    setStatusFilter("acik");
                     setSearchTerm("");
                     setDeptFilter("all");
                   }}
@@ -7789,29 +8209,95 @@ export default function DofAdmin() {
               initial={{ opacity: 0, scale: 0.95, y: 10 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.95, y: 10 }}
-              className="relative w-full max-w-lg max-h-[90vh] bg-white rounded-3xl shadow-2xl border border-slate-100 p-6 sm:p-7 overflow-hidden z-10 flex flex-col"
+              className={`relative w-full ${settingsModalTab === "database" ? "max-w-4xl" : "max-w-2xl"} max-h-[92vh] bg-white rounded-3xl shadow-2xl border border-slate-100 p-5 sm:p-7 overflow-hidden z-10 flex flex-col transition-all duration-200`}
             >
-              <div className="flex items-center justify-between pb-4 border-b border-slate-100 mb-4 shrink-0">
-                <div className="flex items-center gap-2">
-                  <span className="p-1.5 rounded-lg bg-indigo-50 text-indigo-600">
-                    <Settings className="h-4.5 w-4.5" />
-                  </span>
-                  <div>
-                    <h3 className="text-sm font-bold text-slate-900">
-                      Sistem & Parametre Ayarları
-                    </h3>
-                    <p className="text-[10px] text-slate-400 font-medium">Yönetici Paneli & DÖF Süre Davranışları (Sadece Yönetici)</p>
+              {/* Modal Header */}
+              <div className="flex flex-col gap-3 pb-4 border-b border-slate-100 mb-4 shrink-0">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2.5">
+                    <span className="p-2 rounded-xl bg-indigo-50 text-indigo-600">
+                      {settingsModalTab === "database" ? (
+                        <Database className="h-5 w-5 text-indigo-600" />
+                      ) : (
+                        <Settings className="h-5 w-5 text-indigo-600" />
+                      )}
+                    </span>
+                    <div>
+                      <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                        {settingsModalTab === "database" ? "Veritabanı & Tablo Mimarisi" : "Sistem & Parametre Ayarları"}
+                        {settingsModalTab === "database" && (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                            Canlı Firestore
+                          </span>
+                        )}
+                      </h3>
+                      <p className="text-[11px] text-slate-400 font-medium">
+                        {settingsModalTab === "database"
+                          ? "Google Cloud Firestore veritabanı bağlantı detayları, canlı koleksiyon kayıtları ve şemalar"
+                          : "Yönetici Paneli, termin süreleri ve DÖF davranış parametreleri (Sadece Yönetici)"}
+                      </p>
+                    </div>
                   </div>
+                  <button
+                    onClick={() => setIsSettingsOpen(false)}
+                    className="p-2 rounded-xl text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition cursor-pointer"
+                    title="Kapat"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
                 </div>
-                <button
-                  onClick={() => setIsSettingsOpen(false)}
-                  className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-50 transition cursor-pointer"
-                >
-                  <X className="h-4 w-4" />
-                </button>
+
+                {/* Tab Switcher */}
+                <div className="flex items-center gap-2 p-1 bg-slate-100/90 rounded-2xl w-full sm:w-auto self-start border border-slate-200/60">
+                  <button
+                    type="button"
+                    onClick={() => setSettingsModalTab("parameters")}
+                    className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer ${
+                      settingsModalTab === "parameters"
+                        ? "bg-white text-indigo-700 shadow-xs"
+                        : "text-slate-600 hover:text-slate-900 hover:bg-slate-200/50"
+                    }`}
+                  >
+                    <SlidersHorizontal className="h-3.5 w-3.5" />
+                    <span>Parametre Ayarları</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSettingsModalTab("database")}
+                    className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer ${
+                      settingsModalTab === "database"
+                        ? "bg-indigo-600 text-white shadow-xs"
+                        : "text-slate-600 hover:text-slate-900 hover:bg-slate-200/50"
+                    }`}
+                  >
+                    <Database className="h-3.5 w-3.5" />
+                    <span>Veritabanı & Tablolar</span>
+                    <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-extrabold ${settingsModalTab === "database" ? "bg-white/20 text-white" : "bg-emerald-100 text-emerald-800"}`}>
+                      7 Tablo
+                    </span>
+                  </button>
+                </div>
               </div>
 
-              <div className="space-y-4 overflow-y-auto pr-1">
+              {settingsModalTab === "database" ? (
+                <div className="overflow-y-auto pr-1 flex-1 py-1">
+                  <DofDatabaseSettings
+                    dofsCount={dofs.length}
+                    departmentsCount={departments.length}
+                    panelUsersCount={panelUsers.length}
+                    foldersCount={folders.length}
+                    passwordRequestsCount={passwordRequests.length}
+                    emailLogsCount={emailLogs.length}
+                    sampleDof={dofs[0]}
+                    onRefreshAll={() => {
+                      fetchLogs();
+                      fetchAllUsers();
+                    }}
+                  />
+                </div>
+              ) : (
+                <div className="space-y-4 overflow-y-auto pr-1 flex-1">
                 {/* 0. DÖF Varsayılan Planlama Süreleri (Termin / İş Günü Ayarları) */}
                 <div className="bg-gradient-to-br from-amber-50/70 via-indigo-50/30 to-white border border-amber-200/80 rounded-2xl p-4 space-y-3 shadow-2xs">
                   <div className="flex items-center justify-between border-b border-amber-200/50 pb-2">
@@ -7987,7 +8473,9 @@ export default function DofAdmin() {
                     onChange={(e) => setDefaultStatusFilterSetting(e.target.value)}
                     className="w-full bg-slate-50 hover:bg-slate-50/80 border border-slate-200 rounded-lg p-2 text-xs font-medium focus:border-indigo-500 focus:bg-white outline-none"
                   >
+                    <option value="acik">🟢 Açık & İşlemde (Varsayılan - Yeni & İnceleniyor)</option>
                     <option value="all">Tümü (Filtresiz)</option>
+                    <option value="kapali">🔴 Kapalı (Çözüldü & Reddedildi)</option>
                     <option value="yeni">Yeni Başvurular</option>
                     <option value="inceleniyor">İncelemedekiler</option>
                     <option value="cozuldu">Çözülenler</option>
@@ -8049,80 +8537,150 @@ export default function DofAdmin() {
                     </span>
                   </label>
                 </div>
-              </div>
 
-              {/* Action Buttons */}
-              <div className="flex items-center justify-between pt-5 border-t border-slate-100 mt-6 gap-3 shrink-0">
-                <button
-                  type="button"
-                  onClick={async () => {
-                    setPreventiveDaysSetting(7);
-                    setCorrectiveDaysSetting(3);
-                    setDefaultSoundSetting("on");
-                    setDefaultTabSetting("dofs");
-                    setDefaultStatusFilterSetting("all");
-                    setDefaultNotificationSetting("on");
-                    setIsPasscodeLoginPassive(false);
-                    
-                    await saveSystemSettings({
-                      preventiveActionDays: 7,
-                      correctiveActionDays: 3,
-                      defaultSoundSetting: "on",
-                      defaultTabSetting: "dofs",
-                      defaultStatusFilterSetting: "all",
-                      defaultNotificationSetting: "on",
-                      isPasscodeLoginPassive: false,
-                    });
-                    
-                    setIsMuted(false);
-                    setIsSettingsOpen(false);
-                  }}
-                  className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-semibold rounded-lg transition cursor-pointer"
-                >
-                  Varsayılana Sıfırla
-                </button>
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setIsSettingsOpen(false)}
-                    className="px-4 py-2 border border-slate-200 hover:bg-slate-50 text-slate-600 text-xs font-semibold rounded-lg transition cursor-pointer"
-                  >
-                    İptal
-                  </button>
-                  <button
-                    type="button"
-                    onClick={async () => {
-                      const prev = Number(preventiveDaysSetting) || 7;
-                      const corr = Number(correctiveDaysSetting) || 3;
-
-                      await saveSystemSettings({
-                        preventiveActionDays: prev,
-                        correctiveActionDays: corr,
-                        defaultSoundSetting: defaultSoundSetting as any,
-                        defaultTabSetting,
-                        defaultStatusFilterSetting,
-                        defaultNotificationSetting: defaultNotificationSetting as any,
-                        isPasscodeLoginPassive,
-                      });
-                      
-                      // Apply immediately
-                      if (defaultSoundSetting === "on") {
-                        setIsMuted(false);
-                      } else if (defaultSoundSetting === "off") {
-                        setIsMuted(true);
-                      } else if (defaultSoundSetting === "last") {
-                        const last = localStorage.getItem("dof_admin_last_sound_state");
-                        setIsMuted(last === "muted");
-                      }
-
-                      setIsSettingsOpen(false);
-                    }}
-                    className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-lg shadow-sm transition cursor-pointer"
-                  >
-                    Ayarları Kaydet
-                  </button>
+                {/* 5. KVKK Kişisel Veri Gizleme & Maskeleme */}
+                <div className="space-y-1.5 pt-1 bg-gradient-to-br from-indigo-50/70 via-white to-slate-50 border border-indigo-100 rounded-2xl p-4 shadow-2xs">
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="p-1 rounded-lg bg-indigo-600 text-white">
+                      <Shield className="h-3.5 w-3.5" />
+                    </span>
+                    <label className="text-[11px] font-bold text-slate-900 uppercase tracking-wide">
+                      KVKK Kişisel Veri Gizleme & Maskeleme
+                    </label>
+                  </div>
+                  <p className="text-[10px] text-slate-500 leading-normal">
+                    İşaretlendiğinde, sistemdeki tüm DÖF kartlarında, tablolarda, detay pencerelerinde ve raporlarda bildirim yapan kişilerin <strong>Ad Soyad</strong> ve <strong>E-posta / İletişim</strong> bilgileri <em>*** Gizli (KVKK) ***</em> olarak maskelenir ve kimse tarafından görüntülenemez.
+                  </p>
+                  <label className="flex items-center gap-2.5 pt-2 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={isKvkkMaskingEnabled}
+                      onChange={(e) => setIsKvkkMaskingEnabled(e.target.checked)}
+                      className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                    />
+                    <span className="text-xs font-bold text-indigo-950">
+                      KVKK Veri Gizle (Ad Soyad ve Mail / İletişim Bilgilerini Maskele)
+                    </span>
+                  </label>
                 </div>
               </div>
+            )}
+
+              {/* Action Buttons Footer */}
+              {settingsModalTab === "database" ? (
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between pt-4 border-t border-slate-100 mt-4 gap-3 shrink-0">
+                  <div className="flex items-center gap-2 text-xs text-slate-500 font-medium">
+                    <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                    <span className="font-semibold text-slate-700">Google Cloud Firestore:</span>
+                    <span className="text-emerald-700 font-bold bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full text-[10px]">
+                      Aktif & Senkronize
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2 self-end sm:self-auto">
+                    <button
+                      type="button"
+                      onClick={() => setSettingsModalTab("parameters")}
+                      className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-xl transition cursor-pointer"
+                    >
+                      <SlidersHorizontal className="h-3.5 w-3.5 text-slate-500" />
+                      <span>Parametre Ayarlarına Geç</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setIsSettingsOpen(false)}
+                      className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl shadow-xs transition cursor-pointer"
+                    >
+                      Pencereyi Kapat
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between pt-4 border-t border-slate-100 mt-4 gap-3 shrink-0">
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setSettingsModalTab("database")}
+                      className="inline-flex items-center gap-1.5 px-3 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-bold rounded-xl transition cursor-pointer border border-indigo-200/80 shadow-2xs"
+                    >
+                      <Database className="h-3.5 w-3.5 text-indigo-600" />
+                      <span>Veritabanı & Tablolar</span>
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        setPreventiveDaysSetting(7);
+                        setCorrectiveDaysSetting(3);
+                        setDefaultSoundSetting("on");
+                        setDefaultTabSetting("dofs");
+                        setDefaultStatusFilterSetting("acik");
+                        setDefaultNotificationSetting("on");
+                        setIsPasscodeLoginPassive(false);
+                        setIsKvkkMaskingEnabled(false);
+                        
+                        await saveSystemSettings({
+                          preventiveActionDays: 7,
+                          correctiveActionDays: 3,
+                          defaultSoundSetting: "on",
+                          defaultTabSetting: "dofs",
+                          defaultStatusFilterSetting: "acik",
+                          defaultNotificationSetting: "on",
+                          isPasscodeLoginPassive: false,
+                          isKvkkMaskingEnabled: false,
+                        });
+                        
+                        setIsMuted(false);
+                        setIsSettingsOpen(false);
+                      }}
+                      className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-semibold rounded-xl transition cursor-pointer"
+                    >
+                      Varsayılana Sıfırla
+                    </button>
+                  </div>
+                  <div className="flex items-center gap-2 self-end sm:self-auto">
+                    <button
+                      type="button"
+                      onClick={() => setIsSettingsOpen(false)}
+                      className="px-4 py-2 border border-slate-200 hover:bg-slate-50 text-slate-600 text-xs font-semibold rounded-xl transition cursor-pointer"
+                    >
+                      İptal
+                    </button>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        const prev = Number(preventiveDaysSetting) || 7;
+                        const corr = Number(correctiveDaysSetting) || 3;
+
+                        await saveSystemSettings({
+                          preventiveActionDays: prev,
+                          correctiveActionDays: corr,
+                          defaultSoundSetting: defaultSoundSetting as any,
+                          defaultTabSetting,
+                          defaultStatusFilterSetting,
+                          defaultNotificationSetting: defaultNotificationSetting as any,
+                          isPasscodeLoginPassive,
+                          isKvkkMaskingEnabled,
+                        });
+                        
+                        // Apply immediately
+                        if (defaultSoundSetting === "on") {
+                          setIsMuted(false);
+                        } else if (defaultSoundSetting === "off") {
+                          setIsMuted(true);
+                        } else if (defaultSoundSetting === "last") {
+                          const last = localStorage.getItem("dof_admin_last_sound_state");
+                          setIsMuted(last === "muted");
+                        }
+
+                        setIsSettingsOpen(false);
+                      }}
+                      className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl shadow-sm transition cursor-pointer"
+                    >
+                      Ayarları Kaydet
+                    </button>
+                  </div>
+                </div>
+              )}
             </motion.div>
           </div>
         )}

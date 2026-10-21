@@ -17,6 +17,7 @@ import {
 import { jsPDF } from "jspdf";
 import { DofForm } from "../types";
 import { printElement } from "../utils/posterExporter";
+import { maskKvkkText } from "../lib/settings";
 
 interface DofLandscapePrintModalProps {
   dof: DofForm | null;
@@ -123,7 +124,7 @@ export default function DofLandscapePrintModal({
       drawMetaCell("Faaliyet Turu", dof.type === "düzeltici" ? "Düzeltici (3 İş Günü)" : "Önleyici (7 İş Günü)", 1);
       drawMetaCell("Mevcut Durum", dof.status === "cozuldu" ? "COZULDU / KAPANDI" : dof.status === "inceleniyor" ? "INCELENIYOR" : "YENI", 2);
       drawMetaCell("Atanan Sorumlu", dof.assignedUserName || "Atanmadi", 3);
-      drawMetaCell("Bildiren Kisi", dof.reporterName || "Anonim", 4);
+      drawMetaCell("Bildiren Kisi", maskKvkkText(dof.reporterName, false, "Anonim"), 4);
 
       // --- Split Layout ---
       // Left Column: Text description, 5 Whys, action steps, updates
@@ -460,7 +461,7 @@ export default function DofLandscapePrintModal({
                   </div>
                   <div>
                     <span className="text-[10px] font-bold text-slate-400 block uppercase">Bildiren Kişi</span>
-                    <span className="font-bold text-slate-700 truncate block">{dof.reporterName || "Gizli"}</span>
+                    <span className="font-bold text-slate-700 truncate block">{maskKvkkText(dof.reporterName, false, "Gizli")}</span>
                   </div>
                 </div>
               </div>

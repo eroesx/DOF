@@ -137,7 +137,7 @@ export default function DofSubmitForm({ onGoToTrack, onShowQr }: DofSubmitFormPr
     e.preventDefault();
     setError(null);
 
-    if (!title.trim() || !reporterName.trim() || !description.trim()) {
+    if (!title.trim() || !description.trim()) {
       setError("Lütfen zorunlu alanların (*) tümünü doldurun.");
       return;
     }
@@ -154,7 +154,7 @@ export default function DofSubmitForm({ onGoToTrack, onShowQr }: DofSubmitFormPr
       type,
       title: title.trim(),
       department: department.trim() || "Belirtilmedi",
-      reporterName: reporterName.trim(),
+      reporterName: reporterName.trim() || "Anonim / Belirtilmemiş",
       reporterContact: reporterContact.trim() || "Belirtilmedi",
       description: description.trim(),
       status: "yeni",
@@ -380,15 +380,17 @@ export default function DofSubmitForm({ onGoToTrack, onShowQr }: DofSubmitFormPr
             
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-                <label className="text-xs font-semibold text-slate-600 uppercase block mb-1.5">Ad Soyad *</label>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-xs font-semibold text-slate-600 uppercase">Ad Soyad (İsteğe Bağlı)</label>
+                  <span className="text-[10px] text-slate-400 font-medium">İsteğe Bağlı</span>
+                </div>
                 <div className="relative">
                   <User className="absolute left-3.5 top-3 h-4 w-4 text-slate-400" />
                   <input
                     type="text"
-                    required
                     value={reporterName}
                     onChange={(e) => setReporterName(e.target.value)}
-                    placeholder="Örn: Ahmet Yılmaz"
+                    placeholder="Örn: Ahmet Yılmaz (Anonim kalabilir)"
                     className="w-full bg-slate-50/40 hover:bg-slate-50/70 focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none border border-slate-200 rounded-xl py-2.5 pl-10 pr-4 transition text-sm"
                   />
                 </div>

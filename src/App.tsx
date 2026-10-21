@@ -174,11 +174,11 @@ export default function App() {
   };
 
   const tabs = [
-    { id: "portal", label: "Giriş Portalı", icon: Home },
+    { id: "admin", label: "Yönetim Paneli", icon: Lock },
     { id: "submit", label: "Form Doldur", icon: FileEdit },
     { id: "track", label: "Durum Takip", icon: Search },
-    { id: "admin", label: "Yönetim Paneli", icon: Lock },
-    ...(isAdmin ? [{ id: "qr", label: "Afiş & QR Kod", icon: QrCode }] : []),
+    { id: "portal", label: "Giriş Portalı", icon: Home },
+    { id: "qr", label: "Afiş & QR Kod", icon: QrCode },
     ...(activeTab === "edit" ? [{ id: "edit", label: "Mobil Düzenle", icon: Smartphone }] : []),
   ];
 
@@ -251,7 +251,7 @@ export default function App() {
                   }}
                   className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-xl bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 transition cursor-pointer shadow-2xs"
                   id="header-settings-btn"
-                  title="Sistem & Süre Parametre Ayarları (Sadece Yönetici)"
+                  title="Sistem, Parametre & Veritabanı Tablo Ayarları (Sadece Yönetici)"
                 >
                   <Settings className="h-4 w-4 text-slate-600" />
                   <span>Ayarlar</span>
@@ -364,7 +364,7 @@ export default function App() {
                 id="mobile-tab-settings"
               >
                 <Settings className="h-4.5 w-4.5 text-slate-500" />
-                Sistem Ayarları (Admin)
+                Sistem & Veritabanı Ayarları (Admin)
               </button>
             )}
 
@@ -394,6 +394,7 @@ export default function App() {
               onNavigate={(tab) => setActiveTab(tab)}
               onOpenScanner={() => setIsScannerModalOpen(true)}
               onSearchRef={handleGoToTrack}
+              onOpenEdit={handleOpenMobileEdit}
             />
           )}
           {activeTab === "submit" && (

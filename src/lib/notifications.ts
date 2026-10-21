@@ -101,3 +101,63 @@ Sürecin son durumunu takip etmek veya yorum yazmak için lütfen yönetim panel
     console.error("Error triggering manager email notification:", error);
   }
 }
+
+/**
+ * Logs a permanent DÖF deletion to the email_logs collection for audit and security tracking.
+ * Captures the exact identity (name, email, role) of the user who performed the deletion.
+ */
+export async function logDofDeletion(
+  dof: DofForm,
+  deletedBy: { name?: string; email?: string; role?: string }
+): Promise<void> {
+  try {
+    const actorName = deletedBy.name || "Yönetici";
+    const actorEmail = deletedBy.email || "admin@sistem.local";
+    const actorRole = deletedBy.role || "admin";
+    const refNo = dof.refNo || "Belirtilmemiş";
+    const title = dof.title || "Başlıksız DÖF";
+    const dept = dof.department || "Genel";
+
+    const subject = `🗑️ [DÖF Silindi] #${refNo} - ${title} (${actorName})`;
+    const body = `DÖF kaydı sistemden kalıcı olarak silindi.
+
+Silinen DÖF Bilgileri:
+------------------------------------------
+• Referans No: #${refNo}
+• Başlık: ${title}
+• Faaliyet Türü: ${(dof.type || "").toUpperCase()}
+• Departman: ${dept}
+• Bildiren: ${dof.reporterName || "Anonim / Belirtilmemiş"}
+• Bildiren İletişim: ${dof.reporterContact || "-"}
+• Uygunsuzluk / Açıklama: ${dof.description || "-"}
+
+Silme İşlemini Yapan Yetkili:
+------------------------------------------
+• Ad Soyad: ${actorName}
+• E-posta: ${actorEmail}
+• Yetki Rolü: ${actorRole.toUpperCase()}
+• Silinme Tarihi: ${new Date().toLocaleString("tr-TR")}`;
+
+    const emailLogsRef = collection(db, "email_logs");
+    await addDoc(emailLogsRef, {
+      recipient: actorEmail,
+      to: actorEmail,
+      subject,
+      body,
+      sentAt: new Date().toISOString(),
+      type: "dof_deleted",
+      refNo: refNo,
+      dofRefNo: refNo,
+      actorName: actorName,
+      actorEmail: actorEmail,
+      actorRole: actorRole,
+      department: dept,
+      action: "delete",
+      dofTitle: title,
+    });
+    console.log(`DÖF deletion logged successfully by ${actorName} (${actorEmail})`);
+  } catch (error) {
+    console.error("Error logging DÖF deletion:", error);
+  }
+}
+

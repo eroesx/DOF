@@ -38,6 +38,7 @@ import { updateDof, listPanelUsers } from "../lib/db";
 import { DofForm, DofStatus, DofType, DofComment } from "../types";
 import { DofSingleQrModal } from "./DofSingleQrModal";
 import { DofQrScannerModal, ScanResult } from "./DofQrScannerModal";
+import { maskKvkkText } from "../lib/settings";
 
 interface DofMobileEditorProps {
   initialRefNo?: string | null;
@@ -925,10 +926,10 @@ export const DofMobileEditor: React.FC<DofMobileEditorProps> = ({
               </div>
               <div>
                 <span className="text-[10px] text-slate-400 font-bold uppercase block">Bildiren Kişi</span>
-                <span className="font-bold text-slate-800">{dof.reporterName || "İsimsiz"}</span>
+                <span className="font-bold text-slate-800">{maskKvkkText(dof.reporterName, false, "İsimsiz")}</span>
                 {dof.reporterContact && (
                   <span className="text-[11px] text-slate-500 ml-1.5 font-mono">
-                    ({dof.reporterContact})
+                    ({maskKvkkText(dof.reporterContact)})
                   </span>
                 )}
               </div>

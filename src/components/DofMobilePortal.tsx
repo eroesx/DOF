@@ -18,29 +18,56 @@ import {
   Clock, 
   HelpCircle,
   X,
-  ExternalLink
+  ExternalLink,
+  FileText,
+  Folder,
+  Eye,
+  Calendar,
+  Building,
+  User,
+  Filter,
+  ChevronRight,
+  Layers,
+  Tag,
+  AlertTriangle,
+  Check,
+  Image as ImageIcon
 } from "lucide-react";
-import { collection, getDocs } from "firebase/firestore";
+import { collection, onSnapshot, getDocs } from "firebase/firestore";
 import { db } from "../firebase";
+import { DofForm } from "../types";
+import { maskKvkkText } from "../lib/settings";
 
 interface DofMobilePortalProps {
   onNavigate: (tab: "submit" | "track" | "admin" | "qr" | "edit") => void;
   onOpenScanner: () => void;
   onSearchRef: (refNo: string) => void;
+  onOpenEdit?: (refNo: string) => void;
 }
 
 export const DofMobilePortal: React.FC<DofMobilePortalProps> = ({
   onNavigate,
   onOpenScanner,
   onSearchRef,
+  onOpenEdit,
 }) => {
   const [quickRefInput, setQuickRefInput] = useState("");
   const [stats, setStats] = useState({
     total: 0,
     open: 0,
     resolved: 0,
+    corrective: 0,
+    preventive: 0,
   });
   const [isStatsLoading, setIsStatsLoading] = useState(true);
+
+  // All DOFs for interactive listing
+  const [allDofs, setAllDofs] = useState<DofForm[]>([]);
+  const [activeMetricFilter, setActiveMetricFilter] = useState<"all" | "open" | "resolved" | null>(null);
+  const [selectedTypeFilter, setSelectedTypeFilter] = useState<"all" | "düzeltici" | "önleyici">("all");
+  const [listSearchTerm, setListSearchTerm] = useState("");
+  const [selectedDeptFilter, setSelectedDeptFilter] = useState("all");
+  const [viewDetailModalDof, setViewDetailModalDof] = useState<DofForm | null>(null);
 
   // PWA Install State
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
@@ -72,33 +99,113 @@ export const DofMobilePortal: React.FC<DofMobilePortalProps> = ({
 
     window.addEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
 
-    // Fetch brief stats
-    const fetchQuickStats = async () => {
-      try {
-        const snap = await getDocs(collection(db, "dofs"));
+    // Robust real-time listener for DÖFs and stats without restrictive index queries
+    let unsubscribeSnapshot = () => {};
+    try {
+      const collRef = collection(db, "dofs");
+      unsubscribeSnapshot = onSnapshot(collRef, (snap) => {
         let total = 0;
         let open = 0;
         let resolved = 0;
-        snap.forEach((doc) => {
+        let corrective = 0;
+        let preventive = 0;
+        const list: DofForm[] = [];
+        snap.forEach((docSnap) => {
           total++;
-          const data = doc.data();
-          if (data.status === "cozuldu") {
+          const data = docSnap.data();
+          const item: DofForm = { id: docSnap.id, ...data } as DofForm;
+          list.push(item);
+
+          const st = (data.status || "").toLowerCase().trim();
+          if (st === "cozuldu" || st === "çözüldü" || st === "tamamlandi" || st === "tamamlandı" || st === "kapali" || st === "kapalı") {
             resolved++;
-          } else if (data.status === "yeni" || data.status === "inceleniyor") {
+          } else if (st === "reddedildi" || st === "iptal") {
+            // Cancelled / rejected
+          } else {
+            // "yeni", "inceleniyor", "beklemede", "islem_devam_ediyor", or active
             open++;
           }
+
+          if (data.type === "düzeltici") {
+            corrective++;
+          } else if (data.type === "önleyici") {
+            preventive++;
+          }
         });
-        setStats({ total, open, resolved });
-      } catch (err) {
-        console.warn("Could not load stats for portal (non-fatal):", err);
-      } finally {
+
+        // Safe in-memory sorting by createdAt descending
+        list.sort((a, b) => {
+          const getMillis = (v: any) => {
+            if (!v) return 0;
+            if (v.seconds) return v.seconds * 1000;
+            if (typeof v === "string") {
+              const parsed = Date.parse(v);
+              return isNaN(parsed) ? 0 : parsed;
+            }
+            if (v instanceof Date) return v.getTime();
+            return 0;
+          };
+          return getMillis(b.createdAt) - getMillis(a.createdAt);
+        });
+
+        setAllDofs(list);
+        setStats({ total, open, resolved, corrective, preventive });
         setIsStatsLoading(false);
-      }
-    };
-    fetchQuickStats();
+      }, async (err) => {
+        console.warn("Snapshot notice, attempting fallback fetch:", err);
+        try {
+          const snap = await getDocs(collection(db, "dofs"));
+          let total = 0;
+          let open = 0;
+          let resolved = 0;
+          let corrective = 0;
+          let preventive = 0;
+          const list: DofForm[] = [];
+          snap.forEach((docSnap) => {
+            total++;
+            const data = docSnap.data();
+            const item: DofForm = { id: docSnap.id, ...data } as DofForm;
+            list.push(item);
+            const st = (data.status || "").toLowerCase().trim();
+            if (st === "cozuldu" || st === "çözüldü" || st === "tamamlandi" || st === "tamamlandı" || st === "kapali") {
+              resolved++;
+            } else if (st === "reddedildi" || st === "iptal") {
+              // cancelled
+            } else {
+              open++;
+            }
+            if (data.type === "düzeltici") corrective++;
+            else if (data.type === "önleyici") preventive++;
+          });
+          list.sort((a, b) => {
+            const getMillis = (v: any) => {
+              if (!v) return 0;
+              if (v.seconds) return v.seconds * 1000;
+              if (typeof v === "string") {
+                const parsed = Date.parse(v);
+                return isNaN(parsed) ? 0 : parsed;
+              }
+              if (v instanceof Date) return v.getTime();
+              return 0;
+            };
+            return getMillis(b.createdAt) - getMillis(a.createdAt);
+          });
+          setAllDofs(list);
+          setStats({ total, open, resolved, corrective, preventive });
+        } catch (fallbackErr) {
+          console.error("Critical: Could not load dofs in portal:", fallbackErr);
+        } finally {
+          setIsStatsLoading(false);
+        }
+      });
+    } catch (err) {
+      console.warn("Error setting up dofs listener:", err);
+      setIsStatsLoading(false);
+    }
 
     return () => {
       window.removeEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
+      unsubscribeSnapshot();
     };
   }, []);
 
@@ -127,6 +234,61 @@ export const DofMobilePortal: React.FC<DofMobilePortalProps> = ({
     if (!quickRefInput.trim()) return;
     onSearchRef(quickRefInput.trim().toUpperCase());
   };
+
+  const handleMetricClick = (filter: "all" | "open" | "resolved") => {
+    setActiveMetricFilter(filter);
+    setTimeout(() => {
+      const el = document.getElementById("portal-dof-list-section");
+      if (el) {
+        el.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+    }, 60);
+  };
+
+  const filteredDofs = allDofs.filter((dof) => {
+    // 1. Metric status filter
+    const st = (dof.status || "").toLowerCase().trim();
+    if (activeMetricFilter === "open") {
+      // Must be open / ongoing (not resolved and not cancelled)
+      if (st === "cozuldu" || st === "çözüldü" || st === "tamamlandi" || st === "tamamlandı" || st === "reddedildi" || st === "iptal") {
+        return false;
+      }
+    } else if (activeMetricFilter === "resolved") {
+      // Must be resolved / closed
+      if (st !== "cozuldu" && st !== "çözüldü" && st !== "tamamlandi" && st !== "tamamlandı" && st !== "kapali" && st !== "kapalı") {
+        return false;
+      }
+    }
+
+    // 2. Type filter (düzeltici vs önleyici)
+    if (selectedTypeFilter !== "all") {
+      if (dof.type !== selectedTypeFilter) return false;
+    }
+
+    // 3. Search query filter
+    if (listSearchTerm.trim()) {
+      const q = listSearchTerm.toLowerCase().trim();
+      const matchRef = (dof.refNo || "").toLowerCase().includes(q);
+      const matchTitle = (dof.title || "").toLowerCase().includes(q);
+      const matchDept = (dof.department || "").toLowerCase().includes(q);
+      const matchReporter = (dof.reporterName || "").toLowerCase().includes(q);
+      const matchAssigned = (dof.assignedUserName || "").toLowerCase().includes(q);
+      const matchFolder = (dof.folderName || "").toLowerCase().includes(q);
+      const matchDesc = (dof.description || "").toLowerCase().includes(q);
+      if (!matchRef && !matchTitle && !matchDept && !matchReporter && !matchAssigned && !matchFolder && !matchDesc) {
+        return false;
+      }
+    }
+
+    // 4. Department filter
+    if (selectedDeptFilter !== "all") {
+      if (dof.department !== selectedDeptFilter) return false;
+    }
+
+    return true;
+  });
+
+  const uniqueDepartments = Array.from(new Set(allDofs.map((d) => d.department).filter(Boolean)));
 
   return (
     <div className="space-y-5 pb-20 md:pb-6 animate-fade-in">
@@ -157,25 +319,495 @@ export const DofMobilePortal: React.FC<DofMobilePortalProps> = ({
             </p>
           </div>
 
-          {/* Quick Metrics Bar */}
-          {!isStatsLoading && (
-            <div className="grid grid-cols-3 gap-2 pt-2 border-t border-white/15">
-              <div className="bg-white/10 backdrop-blur-xs rounded-xl p-2.5 text-center border border-white/10">
-                <span className="text-[10px] text-indigo-200 font-bold block uppercase tracking-wider">Toplam</span>
-                <span className="text-lg font-black text-white">{stats.total}</span>
-              </div>
-              <div className="bg-white/10 backdrop-blur-xs rounded-xl p-2.5 text-center border border-white/10">
-                <span className="text-[10px] text-amber-200 font-bold block uppercase tracking-wider">Devam Eden</span>
-                <span className="text-lg font-black text-amber-300">{stats.open}</span>
-              </div>
-              <div className="bg-white/10 backdrop-blur-xs rounded-xl p-2.5 text-center border border-white/10">
-                <span className="text-[10px] text-emerald-200 font-bold block uppercase tracking-wider">Tamamlanan</span>
-                <span className="text-lg font-black text-emerald-300">{stats.resolved}</span>
-              </div>
+          {/* Quick Metrics Bar - Interactive (Toplam, Devam Eden, Tamamlanan Tıklanabilir) */}
+          <div className="space-y-2.5 pt-3 border-t border-white/15">
+            <div className="flex items-center justify-between text-[11px] text-indigo-200 font-semibold px-0.5">
+              <span className="flex items-center gap-1.5">
+                <Sparkles className="h-3.5 w-3.5 text-amber-300" />
+                <span>DÖF Canlı İstatistikleri</span>
+              </span>
+              <span className="text-[10px] text-indigo-200/80 font-medium">
+                {activeMetricFilter ? "Filtreyi değiştirmek için dokunun" : "İlgili DÖF'leri getirmek için dokunun 👇"}
+              </span>
             </div>
-          )}
+
+            <div className="grid grid-cols-3 gap-2">
+              {/* Toplam */}
+              <button
+                type="button"
+                onClick={() => handleMetricClick("all")}
+                className={`backdrop-blur-xs rounded-2xl p-2.5 text-center border transition-all cursor-pointer active:scale-95 flex flex-col items-center justify-center relative ${
+                  activeMetricFilter === "all"
+                    ? "bg-white text-indigo-950 border-white shadow-xl ring-2 ring-white/80"
+                    : "bg-white/10 hover:bg-white/20 text-white border-white/10 hover:border-white/30"
+                }`}
+                id="portal-metric-total"
+                title="Tüm DÖF'leri Listele"
+              >
+                <span className={`text-[10px] font-bold block uppercase tracking-wider ${activeMetricFilter === "all" ? "text-indigo-600" : "text-indigo-200"}`}>
+                  Toplam
+                </span>
+                <span className={`text-xl font-black ${activeMetricFilter === "all" ? "text-indigo-950" : "text-white"}`}>
+                  {isStatsLoading ? "..." : stats.total}
+                </span>
+                {activeMetricFilter === "all" ? (
+                  <span className="text-[9px] font-black text-indigo-600 flex items-center gap-1 mt-0.5 bg-indigo-50 px-1.5 py-0.2 rounded-full">
+                    <span className="w-1.5 h-1.5 rounded-full bg-indigo-600 animate-pulse" /> Seçili
+                  </span>
+                ) : (
+                  <span className="text-[9px] text-indigo-200/70 mt-0.5">Tüm DÖF'ler</span>
+                )}
+              </button>
+
+              {/* Devam Eden */}
+              <button
+                type="button"
+                onClick={() => handleMetricClick("open")}
+                className={`backdrop-blur-xs rounded-2xl p-2.5 text-center border transition-all cursor-pointer active:scale-95 flex flex-col items-center justify-center relative ${
+                  activeMetricFilter === "open"
+                    ? "bg-amber-400 text-slate-950 border-amber-300 shadow-xl ring-2 ring-amber-200 font-bold"
+                    : "bg-white/10 hover:bg-white/20 text-white border-white/10 hover:border-white/30"
+                }`}
+                id="portal-metric-open"
+                title="Devam Eden & Açık Faaliyetleri Listele"
+              >
+                <span className={`text-[10px] font-bold block uppercase tracking-wider ${activeMetricFilter === "open" ? "text-slate-950 font-black" : "text-amber-200"}`}>
+                  Devam Eden
+                </span>
+                <span className={`text-xl font-black ${activeMetricFilter === "open" ? "text-slate-950" : "text-amber-300"}`}>
+                  {isStatsLoading ? "..." : stats.open}
+                </span>
+                {activeMetricFilter === "open" ? (
+                  <span className="text-[9px] font-black text-slate-950 flex items-center gap-1 mt-0.5 bg-amber-300 px-1.5 py-0.2 rounded-full">
+                    <span className="w-1.5 h-1.5 rounded-full bg-slate-950 animate-pulse" /> Seçili
+                  </span>
+                ) : (
+                  <span className="text-[9px] text-amber-200/80 mt-0.5">İşlemde olanlar</span>
+                )}
+              </button>
+
+              {/* Tamamlanan */}
+              <button
+                type="button"
+                onClick={() => handleMetricClick("resolved")}
+                className={`backdrop-blur-xs rounded-2xl p-2.5 text-center border transition-all cursor-pointer active:scale-95 flex flex-col items-center justify-center relative ${
+                  activeMetricFilter === "resolved"
+                    ? "bg-emerald-400 text-slate-950 border-emerald-300 shadow-xl ring-2 ring-emerald-200 font-bold"
+                    : "bg-white/10 hover:bg-white/20 text-white border-white/10 hover:border-white/30"
+                }`}
+                id="portal-metric-resolved"
+                title="Tamamlanan / Çözülen Faaliyetleri Listele"
+              >
+                <span className={`text-[10px] font-bold block uppercase tracking-wider ${activeMetricFilter === "resolved" ? "text-slate-950 font-black" : "text-emerald-200"}`}>
+                  Tamamlanan
+                </span>
+                <span className={`text-xl font-black ${activeMetricFilter === "resolved" ? "text-slate-950" : "text-emerald-300"}`}>
+                  {isStatsLoading ? "..." : stats.resolved}
+                </span>
+                {activeMetricFilter === "resolved" ? (
+                  <span className="text-[9px] font-black text-slate-950 flex items-center gap-1 mt-0.5 bg-emerald-300 px-1.5 py-0.2 rounded-full">
+                    <span className="w-1.5 h-1.5 rounded-full bg-slate-950 animate-pulse" /> Seçili
+                  </span>
+                ) : (
+                  <span className="text-[9px] text-emerald-200/80 mt-0.5">Çözülenler</span>
+                )}
+              </button>
+            </div>
+
+            {/* Notification Banner when filter is active */}
+            {activeMetricFilter && (
+              <div className="pt-1.5 flex items-center justify-between text-[11px] font-bold text-white bg-white/15 backdrop-blur-md rounded-2xl px-3.5 py-2 border border-white/20 shadow-xs animate-fade-in">
+                <span className="flex items-center gap-2">
+                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse shrink-0" />
+                  <span className="line-clamp-1">
+                    {activeMetricFilter === "all" ? "Toplam Tüm DÖF'ler" : activeMetricFilter === "open" ? "Devam Eden Faaliyetler" : "Tamamlanan Faaliyetler"} Getirildi ({filteredDofs.length} Kayıt)
+                  </span>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const el = document.getElementById("portal-dof-list-section");
+                    if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+                  }}
+                  className="text-amber-300 hover:text-white font-extrabold underline text-[11px] flex items-center gap-0.5 shrink-0 ml-2 cursor-pointer"
+                >
+                  Aşağı Kaydır <ChevronRight className="h-3 w-3" />
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       </div>
+
+      {/* İlgili DÖF'ler Listesi (Toplam, Devam Eden veya Tamamlanan tıklandığında açılır) */}
+      {activeMetricFilter && (
+        <div 
+          id="portal-dof-list-section"
+          className="bg-white border-2 border-indigo-500/30 rounded-3xl p-4 sm:p-5 shadow-xl space-y-4 animate-fade-in scroll-mt-4"
+        >
+          {/* Header */}
+          <div className="flex items-center justify-between gap-2 border-b border-slate-100 pb-3">
+            <div className="flex items-center gap-2.5">
+              <div className={`p-2 rounded-xl text-white shadow-md ${
+                activeMetricFilter === "resolved" 
+                  ? "bg-emerald-600 shadow-emerald-200"
+                  : activeMetricFilter === "open"
+                  ? "bg-amber-500 shadow-amber-200"
+                  : "bg-indigo-600 shadow-indigo-200"
+              }`}>
+                {activeMetricFilter === "resolved" ? (
+                  <CheckCircle2 className="h-5 w-5" />
+                ) : activeMetricFilter === "open" ? (
+                  <Clock className="h-5 w-5" />
+                ) : (
+                  <Layers className="h-5 w-5" />
+                )}
+              </div>
+              <div>
+                <h3 className="text-sm font-black text-slate-900 tracking-tight flex items-center gap-1.5">
+                  <span>
+                    {activeMetricFilter === "resolved" 
+                      ? "Tamamlanan (Çözülen) Faaliyetler"
+                      : activeMetricFilter === "open"
+                      ? "Devam Eden (Açık) Faaliyetler"
+                      : "Toplam DÖF Faaliyetleri"}
+                  </span>
+                </h3>
+                <span className="text-[11px] text-slate-500 font-semibold">
+                  {filteredDofs.length} kayıt listeleniyor · Detay için karta dokunun
+                </span>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setActiveMetricFilter(null)}
+              className="p-1.5 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition cursor-pointer"
+              title="Listeyi Kapat"
+            >
+              <X className="h-5 w-5" />
+            </button>
+          </div>
+
+          {/* Filter Pills & In-place Search */}
+          <div className="space-y-2.5">
+            {/* Status Pills */}
+            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none">
+              <button
+                type="button"
+                onClick={() => setActiveMetricFilter("all")}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition shrink-0 cursor-pointer flex items-center gap-1.5 ${
+                  activeMetricFilter === "all"
+                    ? "bg-slate-900 text-white shadow-xs ring-1 ring-slate-800"
+                    : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                }`}
+              >
+                <span>Tüm DÖF'ler</span>
+                <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono ${activeMetricFilter === "all" ? "bg-slate-700 text-white" : "bg-slate-200 text-slate-700"}`}>
+                  {stats.total}
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setActiveMetricFilter("open")}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition shrink-0 cursor-pointer flex items-center gap-1.5 ${
+                  activeMetricFilter === "open"
+                    ? "bg-amber-500 text-slate-950 shadow-xs ring-1 ring-amber-400 font-black"
+                    : "bg-amber-50 text-amber-800 hover:bg-amber-100 border border-amber-200"
+                }`}
+              >
+                <Clock className="h-3.5 w-3.5" />
+                <span>Devam Edenler</span>
+                <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono ${activeMetricFilter === "open" ? "bg-amber-600 text-white" : "bg-amber-200 text-amber-900"}`}>
+                  {stats.open}
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setActiveMetricFilter("resolved")}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition shrink-0 cursor-pointer flex items-center gap-1.5 ${
+                  activeMetricFilter === "resolved"
+                    ? "bg-emerald-600 text-white shadow-xs ring-1 ring-emerald-500 font-black"
+                    : "bg-emerald-50 text-emerald-800 hover:bg-emerald-100 border border-emerald-200"
+                }`}
+              >
+                <CheckCircle2 className="h-3.5 w-3.5" />
+                <span>Tamamlananlar</span>
+                <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono ${activeMetricFilter === "resolved" ? "bg-emerald-700 text-white" : "bg-emerald-200 text-emerald-900"}`}>
+                  {stats.resolved}
+                </span>
+              </button>
+            </div>
+
+            {/* Type Pills (Düzeltici / Önleyici ayrımı) */}
+            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none text-[11px]">
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider shrink-0 mr-1">
+                Tür:
+              </span>
+              <button
+                type="button"
+                onClick={() => setSelectedTypeFilter("all")}
+                className={`px-2.5 py-1 rounded-lg font-bold transition shrink-0 cursor-pointer ${
+                  selectedTypeFilter === "all"
+                    ? "bg-indigo-600 text-white shadow-2xs"
+                    : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                }`}
+              >
+                Tümü
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setSelectedTypeFilter("düzeltici")}
+                className={`px-2.5 py-1 rounded-lg font-bold transition shrink-0 cursor-pointer flex items-center gap-1 ${
+                  selectedTypeFilter === "düzeltici"
+                    ? "bg-indigo-700 text-white shadow-2xs"
+                    : "bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border border-indigo-200"
+                }`}
+              >
+                <Wrench className="h-3 w-3" />
+                <span>Düzeltici</span>
+                <span className="font-mono text-[10px]">({stats.corrective})</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setSelectedTypeFilter("önleyici")}
+                className={`px-2.5 py-1 rounded-lg font-bold transition shrink-0 cursor-pointer flex items-center gap-1 ${
+                  selectedTypeFilter === "önleyici"
+                    ? "bg-teal-700 text-white shadow-2xs"
+                    : "bg-teal-50 text-teal-800 hover:bg-teal-100 border border-teal-200"
+                }`}
+              >
+                <ShieldCheck className="h-3 w-3" />
+                <span>Önleyici</span>
+                <span className="font-mono text-[10px]">({stats.preventive})</span>
+              </button>
+            </div>
+
+            {/* Arama Input & Departman Filtresi */}
+            <div className="flex flex-col sm:flex-row gap-2">
+              <div className="relative flex-1">
+                <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+                <input
+                  type="text"
+                  placeholder="Ref No, başlık, birim veya sorumlu ara..."
+                  value={listSearchTerm}
+                  onChange={(e) => setListSearchTerm(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl py-2 pl-9 pr-8 text-xs font-medium outline-none focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition"
+                />
+                {listSearchTerm && (
+                  <button
+                    type="button"
+                    onClick={() => setListSearchTerm("")}
+                    className="absolute right-2.5 top-2.5 text-slate-400 hover:text-slate-600 cursor-pointer"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </div>
+
+              {uniqueDepartments.length > 0 && (
+                <div className="sm:w-44">
+                  <select
+                    value={selectedDeptFilter}
+                    onChange={(e) => setSelectedDeptFilter(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl py-2 px-2.5 text-xs font-medium outline-none focus:bg-white focus:border-indigo-500 cursor-pointer"
+                  >
+                    <option value="all">Tüm Birimler</option>
+                    {uniqueDepartments.map((dept) => (
+                      <option key={dept} value={dept}>{dept}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* DÖF Kartları Listesi */}
+          {filteredDofs.length === 0 ? (
+            <div className="py-10 text-center text-slate-400 text-xs space-y-2 bg-slate-50 rounded-2xl border border-dashed border-slate-200">
+              <p className="font-medium">Bu filtreye uygun DÖF kaydı bulunamadı.</p>
+              {(listSearchTerm || selectedDeptFilter !== "all" || selectedTypeFilter !== "all") && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setListSearchTerm("");
+                    setSelectedDeptFilter("all");
+                    setSelectedTypeFilter("all");
+                  }}
+                  className="text-indigo-600 font-bold hover:underline text-xs cursor-pointer"
+                >
+                  Filtreleri Temizle
+                </button>
+              )}
+            </div>
+          ) : (
+            <div className="space-y-3 max-h-[520px] overflow-y-auto pr-1">
+              {filteredDofs.map((dof) => (
+                <div
+                  key={dof.id}
+                  onClick={() => setViewDetailModalDof(dof)}
+                  className="group bg-slate-50/70 hover:bg-indigo-50/40 border border-slate-200 hover:border-indigo-400 rounded-2xl p-4 transition-all shadow-2xs hover:shadow-md space-y-2.5 cursor-pointer active:scale-[0.99]"
+                >
+                  {/* Top: Ref No, Type & Status */}
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className="font-mono text-xs font-bold text-indigo-700 bg-white px-2 py-0.5 rounded-md border border-slate-200 shadow-2xs">
+                        {dof.refNo}
+                      </span>
+                      <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold ${
+                        dof.type === "düzeltici" 
+                          ? "bg-indigo-100/70 text-indigo-800 border border-indigo-200/50" 
+                          : "bg-teal-100/70 text-teal-800 border border-teal-200/50"
+                      }`}>
+                        {dof.type === "düzeltici" ? (
+                          <Wrench className="h-2.5 w-2.5" />
+                        ) : (
+                          <ShieldCheck className="h-2.5 w-2.5" />
+                        )}
+                        {dof.type === "düzeltici" ? "Düzeltici" : "Önleyici"}
+                      </span>
+
+                      {dof.folderName ? (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-amber-50 text-amber-800 border border-amber-200 text-[10px] font-bold">
+                          <Folder className="h-2.5 w-2.5 text-amber-600" />
+                          {dof.folderName}
+                        </span>
+                      ) : null}
+                    </div>
+
+                    {/* Status Badge */}
+                    <div>
+                      {dof.status === "cozuldu" ? (
+                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-emerald-100 text-emerald-800 border border-emerald-300">
+                          <CheckCircle2 className="h-3 w-3 text-emerald-600" />
+                          Tamamlandı (Çözüldü)
+                        </span>
+                      ) : dof.status === "inceleniyor" ? (
+                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-amber-100 text-amber-900 border border-amber-300">
+                          <Clock className="h-3 w-3 text-amber-600 animate-spin" style={{ animationDuration: '4s' }} />
+                          İnceleniyor (İşlemde)
+                        </span>
+                      ) : dof.status === "reddedildi" ? (
+                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-rose-100 text-rose-800 border border-rose-300">
+                          <X className="h-3 w-3 text-rose-600" />
+                          Kapatıldı / İptal
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-blue-100 text-blue-800 border border-blue-300">
+                          <AlertCircle className="h-3 w-3 text-blue-600" />
+                          Yeni Başvuru
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Title & Description */}
+                  <div>
+                    <h4 className="text-xs sm:text-sm font-bold text-slate-900 group-hover:text-indigo-600 transition">
+                      {dof.title}
+                    </h4>
+                    {dof.description && (
+                      <p className="text-[11px] text-slate-500 line-clamp-2 mt-1 leading-relaxed">
+                        {dof.description}
+                      </p>
+                    )}
+                  </div>
+
+                  {/* Department & Personnel info */}
+                  <div className="flex items-center gap-3 text-[11px] text-slate-500 font-medium flex-wrap">
+                    <span className="flex items-center gap-1">
+                      <Building className="h-3 w-3 text-slate-400" />
+                      {dof.department}
+                    </span>
+                    {dof.assignedUserName && (
+                      <span className="flex items-center gap-1">
+                        <User className="h-3 w-3 text-slate-400" />
+                        Sorumlu: {dof.assignedUserName}
+                      </span>
+                    )}
+                    {(dof.imageUrl || dof.beforeImageUrl || dof.afterImageUrl) && (
+                      <span className="flex items-center gap-1 text-indigo-600 font-semibold text-[10px] bg-indigo-50 px-1.5 py-0.5 rounded-md">
+                        <ImageIcon className="h-3 w-3" />
+                        Fotoğraflı
+                      </span>
+                    )}
+                    {dof.createdAt && (
+                      <span className="flex items-center gap-1 text-slate-400 ml-auto">
+                        <Calendar className="h-3 w-3" />
+                        {dof.createdAt?.seconds 
+                          ? new Date(dof.createdAt.seconds * 1000).toLocaleDateString("tr-TR")
+                          : new Date(dof.createdAt).toLocaleDateString("tr-TR")}
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Card Action Buttons */}
+                  <div className="pt-2 border-t border-slate-200/60 flex items-center justify-between gap-2 flex-wrap">
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setViewDetailModalDof(dof);
+                      }}
+                      className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-bold text-slate-700 bg-white hover:bg-slate-100 border border-slate-200 rounded-lg transition cursor-pointer shadow-2xs"
+                    >
+                      <Eye className="h-3 w-3 text-slate-500" />
+                      <span>Hızlı İncele</span>
+                    </button>
+
+                    <div className="flex items-center gap-1.5 ml-auto">
+                      {onOpenEdit && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onOpenEdit(dof.refNo);
+                          }}
+                          className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-bold text-purple-700 bg-purple-50 hover:bg-purple-100 border border-purple-200/80 rounded-lg transition cursor-pointer"
+                        >
+                          <Smartphone className="h-3 w-3 text-purple-600" />
+                          <span>Düzenle</span>
+                        </button>
+                      )}
+
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onSearchRef(dof.refNo);
+                        }}
+                        className="inline-flex items-center gap-1 px-3 py-1 text-[11px] font-extrabold text-white bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 rounded-lg transition cursor-pointer shadow-xs"
+                      >
+                        <span>Durum Takibi</span>
+                        <ArrowRight className="h-3 w-3" />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Quick jump to Admin panel if needed */}
+          <div className="pt-2 border-t border-slate-100 flex items-center justify-between">
+            <span className="text-[11px] text-slate-400">
+              Yönetici veya detaylı işlem paneli için:
+            </span>
+            <button
+              type="button"
+              onClick={() => onNavigate("admin")}
+              className="text-xs font-bold text-indigo-600 hover:text-indigo-800 hover:underline flex items-center gap-1 cursor-pointer"
+            >
+              Yönetim Paneline Git
+              <ExternalLink className="h-3 w-3" />
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Mobil Uygulama Kısayolu (PWA Ekle) Kartı */}
       {!isInstalled && (
@@ -479,6 +1111,226 @@ export const DofMobilePortal: React.FC<DofMobilePortalProps> = ({
               >
                 Anladım, Kapat
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Detaylı DÖF İnceleme & İşlem Modalı */}
+      {viewDetailModalDof && (
+        <div className="fixed inset-0 bg-slate-950/75 backdrop-blur-xs z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 animate-fade-in">
+          <div className="bg-white rounded-t-3xl sm:rounded-3xl max-w-2xl w-full max-h-[92vh] flex flex-col shadow-2xl overflow-hidden animate-slide-up border border-slate-150">
+            {/* Modal Header */}
+            <div className="px-5 py-4 bg-slate-900 text-white flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-2.5 flex-wrap">
+                <span className="font-mono text-xs font-black bg-white/15 px-2.5 py-1 rounded-lg border border-white/20 text-indigo-200">
+                  {viewDetailModalDof.refNo}
+                </span>
+                <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold ${
+                  viewDetailModalDof.type === "düzeltici"
+                    ? "bg-indigo-600/90 text-white"
+                    : "bg-teal-600/90 text-white"
+                }`}>
+                  {viewDetailModalDof.type === "düzeltici" ? <Wrench className="h-3 w-3" /> : <ShieldCheck className="h-3 w-3" />}
+                  {viewDetailModalDof.type === "düzeltici" ? "Düzeltici" : "Önleyici"}
+                </span>
+                {viewDetailModalDof.folderName && (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-amber-500/20 text-amber-200 border border-amber-400/30 text-[10px] font-bold">
+                    <Folder className="h-2.5 w-2.5" />
+                    {viewDetailModalDof.folderName}
+                  </span>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={() => setViewDetailModalDof(null)}
+                className="p-1.5 rounded-xl text-slate-300 hover:text-white hover:bg-white/10 transition cursor-pointer"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            {/* Modal Body - Scrollable */}
+            <div className="p-5 space-y-4 overflow-y-auto">
+              {/* Title & Status */}
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+                    Faaliyet Durumu
+                  </span>
+                  <div>
+                    {viewDetailModalDof.status === "cozuldu" ? (
+                      <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-extrabold bg-emerald-100 text-emerald-800 border border-emerald-300">
+                        <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
+                        Tamamlandı (Çözüldü)
+                      </span>
+                    ) : viewDetailModalDof.status === "inceleniyor" ? (
+                      <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-extrabold bg-amber-100 text-amber-900 border border-amber-300">
+                        <Clock className="h-3.5 w-3.5 text-amber-600 animate-spin" style={{ animationDuration: '4s' }} />
+                        İnceleniyor (İşlemde)
+                      </span>
+                    ) : viewDetailModalDof.status === "reddedildi" ? (
+                      <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-extrabold bg-rose-100 text-rose-800 border border-rose-300">
+                        <X className="h-3.5 w-3.5 text-rose-600" />
+                        Kapatıldı / İptal
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-extrabold bg-blue-100 text-blue-800 border border-blue-300">
+                        <AlertCircle className="h-3.5 w-3.5 text-blue-600" />
+                        Yeni Başvuru
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <h3 className="text-base font-bold text-slate-900 leading-snug">
+                  {viewDetailModalDof.title}
+                </h3>
+              </div>
+
+              {/* Meta Grid */}
+              <div className="grid grid-cols-2 gap-2 text-xs">
+                <div className="bg-slate-50 p-3 rounded-2xl border border-slate-100">
+                  <span className="text-[10px] font-bold text-slate-400 block uppercase">Departman / Birim</span>
+                  <span className="font-bold text-slate-900 flex items-center gap-1.5 mt-0.5">
+                    <Building className="h-3.5 w-3.5 text-indigo-600" />
+                    {viewDetailModalDof.department}
+                  </span>
+                </div>
+                <div className="bg-slate-50 p-3 rounded-2xl border border-slate-100">
+                  <span className="text-[10px] font-bold text-slate-400 block uppercase">Atanan Sorumlu</span>
+                  <span className="font-bold text-slate-900 flex items-center gap-1.5 mt-0.5">
+                    <User className="h-3.5 w-3.5 text-indigo-600" />
+                    {viewDetailModalDof.assignedUserName || "Henüz atanmadı"}
+                  </span>
+                </div>
+                <div className="bg-slate-50 p-3 rounded-2xl border border-slate-100">
+                  <span className="text-[10px] font-bold text-slate-400 block uppercase">Bildiren Kişi</span>
+                  <span className="font-medium text-slate-700 block mt-0.5">
+                    {maskKvkkText(viewDetailModalDof.reporterName)}
+                  </span>
+                  {viewDetailModalDof.reporterContact && (
+                    <span className="text-[10px] text-slate-400 block">{maskKvkkText(viewDetailModalDof.reporterContact)}</span>
+                  )}
+                </div>
+                <div className="bg-slate-50 p-3 rounded-2xl border border-slate-100">
+                  <span className="text-[10px] font-bold text-slate-400 block uppercase">Bildirim Tarihi</span>
+                  <span className="font-medium text-slate-700 block mt-0.5">
+                    {viewDetailModalDof.createdAt?.seconds 
+                      ? new Date(viewDetailModalDof.createdAt.seconds * 1000).toLocaleString("tr-TR")
+                      : new Date(viewDetailModalDof.createdAt || Date.now()).toLocaleDateString("tr-TR")}
+                  </span>
+                </div>
+              </div>
+
+              {/* Description */}
+              {viewDetailModalDof.description && (
+                <div className="space-y-1 bg-slate-50 p-3.5 rounded-2xl border border-slate-100">
+                  <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">
+                    Uygunsuzluk / Tespit Açıklaması
+                  </span>
+                  <p className="text-xs text-slate-700 whitespace-pre-wrap leading-relaxed">
+                    {viewDetailModalDof.description}
+                  </p>
+                </div>
+              )}
+
+              {/* Proposed Action */}
+              {viewDetailModalDof.proposedAction && (
+                <div className="space-y-1 bg-indigo-50/60 p-3.5 rounded-2xl border border-indigo-100">
+                  <span className="text-[10px] font-bold text-indigo-800 uppercase tracking-wider block flex items-center gap-1">
+                    <Wrench className="h-3 w-3 text-indigo-600" />
+                    Önerilen Çözüm / Aksiyon
+                  </span>
+                  <p className="text-xs text-indigo-950 whitespace-pre-wrap leading-relaxed">
+                    {viewDetailModalDof.proposedAction}
+                  </p>
+                </div>
+              )}
+
+              {/* Admin / Manager Feedback */}
+              {viewDetailModalDof.adminFeedback && (
+                <div className="space-y-1 bg-emerald-50/60 p-3.5 rounded-2xl border border-emerald-100">
+                  <span className="text-[10px] font-bold text-emerald-800 uppercase tracking-wider block flex items-center gap-1">
+                    <CheckCircle2 className="h-3 w-3 text-emerald-600" />
+                    Yönetici Geri Bildirimi / Çözüm Sonucu
+                  </span>
+                  <p className="text-xs text-emerald-950 whitespace-pre-wrap leading-relaxed">
+                    {viewDetailModalDof.adminFeedback}
+                  </p>
+                </div>
+              )}
+
+              {/* Photos Comparison (Önce / Sonra) */}
+              {(viewDetailModalDof.beforeImageUrl || viewDetailModalDof.afterImageUrl || viewDetailModalDof.imageUrl) && (
+                <div className="space-y-2 pt-1">
+                  <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">
+                    Fotoğraflar & Görseller
+                  </span>
+                  <div className="grid grid-cols-2 gap-2">
+                    {(viewDetailModalDof.beforeImageUrl || viewDetailModalDof.imageUrl) && (
+                      <div className="space-y-1">
+                        <span className="text-[10px] font-bold text-slate-500">Faaliyet Öncesi</span>
+                        <img 
+                          src={viewDetailModalDof.beforeImageUrl || viewDetailModalDof.imageUrl} 
+                          alt="Önce" 
+                          className="w-full h-32 object-cover rounded-xl border border-slate-200"
+                        />
+                      </div>
+                    )}
+                    {viewDetailModalDof.afterImageUrl && (
+                      <div className="space-y-1">
+                        <span className="text-[10px] font-bold text-emerald-700">Faaliyet Sonrası (Çözüldü)</span>
+                        <img 
+                          src={viewDetailModalDof.afterImageUrl} 
+                          alt="Sonra" 
+                          className="w-full h-32 object-cover rounded-xl border border-emerald-200"
+                        />
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Modal Footer Actions */}
+            <div className="p-4 bg-slate-50 border-t border-slate-100 flex items-center justify-between gap-2 shrink-0 flex-wrap">
+              <button
+                type="button"
+                onClick={() => setViewDetailModalDof(null)}
+                className="px-3.5 py-2 text-xs font-bold text-slate-600 hover:text-slate-800 bg-white hover:bg-slate-100 border border-slate-200 rounded-xl transition cursor-pointer"
+              >
+                Kapat
+              </button>
+
+              <div className="flex items-center gap-2 ml-auto">
+                {onOpenEdit && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const ref = viewDetailModalDof.refNo;
+                      setViewDetailModalDof(null);
+                      onOpenEdit(ref);
+                    }}
+                    className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-purple-700 bg-purple-100/70 hover:bg-purple-200/70 border border-purple-200 rounded-xl transition cursor-pointer"
+                  >
+                    <Smartphone className="h-3.5 w-3.5 text-purple-600" />
+                    <span>Düzenle</span>
+                  </button>
+                )}
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    const ref = viewDetailModalDof.refNo;
+                    setViewDetailModalDof(null);
+                    onSearchRef(ref);
+                  }}
+                  className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl shadow-md shadow-indigo-100 transition cursor-pointer"
+                >
+                  <Search className="h-3.5 w-3.5" />
+                  <span>Durum Takibinde Aç</span>
+                </button>
+              </div>
             </div>
           </div>
         </div>
