@@ -20,13 +20,15 @@ import {
   QrCode,
   Smartphone,
   Copy,
-  Check
+  Check,
+  Download
 } from "lucide-react";
 import { collection, query, where, getDocs, doc, updateDoc } from "firebase/firestore";
 import { db } from "../firebase";
 import { DofForm, DofStatus } from "../types";
 import { DofSingleQrModal } from "./DofSingleQrModal";
 import { maskKvkkText } from "../lib/settings";
+import { exportDofPdf } from "../utils/dofPdfExporter";
 
 interface DofTrackProps {
   initialRefNo?: string | null;
@@ -57,6 +59,19 @@ export default function DofTrack({ initialRefNo }: DofTrackProps) {
       setTimeout(() => setCopiedRefNo(null), 2500);
     } catch (err) {
       console.error("Clipboard copy error:", err);
+    }
+  };
+
+  const [isPdfExporting, setIsPdfExporting] = useState<Record<string, boolean>>({});
+
+  const handleExportPdf = async (dof: DofForm) => {
+    try {
+      setIsPdfExporting((prev) => ({ ...prev, [dof.id]: true }));
+      await exportDofPdf(dof);
+    } catch (err) {
+      console.error("PDF export error in DofTrack:", err);
+    } finally {
+      setIsPdfExporting((prev) => ({ ...prev, [dof.id]: false }));
     }
   };
 
@@ -340,6 +355,27 @@ export default function DofTrack({ initialRefNo }: DofTrackProps) {
                 >
                   <QrCode className="h-3.5 w-3.5 text-indigo-600" />
                   <span>Mobil QR & Düzenle</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleExportPdf(dof)}
+                  disabled={isPdfExporting[dof.id]}
+                  className="inline-flex items-center gap-1.5 px-3 py-1 bg-white hover:bg-indigo-50 border border-slate-200 hover:border-indigo-400 text-slate-700 hover:text-indigo-700 rounded-full text-xs font-semibold transition shadow-2xs cursor-pointer active:scale-95 disabled:opacity-60"
+                  title="Bu DÖF kaydını şık bir PDF belgesi olarak dışa aktar ve indir"
+                  id={`track-export-pdf-btn-${dof.refNo}`}
+                >
+                  {isPdfExporting[dof.id] ? (
+                    <>
+                      <div className="animate-spin h-3.5 w-3.5 border-2 border-indigo-600 border-t-transparent rounded-full" />
+                      <span>PDF Hazırlanıyor...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Download className="h-3.5 w-3.5 text-indigo-600" />
+                      <span>PDF Olarak Kaydet</span>
+                    </>
+                  )}
                 </button>
               </div>
             </div>

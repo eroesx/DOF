@@ -90,6 +90,7 @@ export const DofMobilePortal: React.FC<DofMobilePortalProps> = ({
   const [showIosGuide, setShowIosGuide] = useState(false);
   const [isIos, setIsIos] = useState(false);
   const [installSuccessToast, setInstallSuccessToast] = useState(false);
+  const [activeTooltip, setActiveTooltip] = useState<string | null>(null);
 
   useEffect(() => {
     // Check if running as standalone PWA
@@ -361,65 +362,31 @@ export const DofMobilePortal: React.FC<DofMobilePortalProps> = ({
   return (
     <div className="space-y-6 pb-24 md:pb-8 animate-fade-in max-w-4xl mx-auto">
       
-      {/* 1. Üst Kısım: Mobil Uygulama Kısayol Ekle (PWA) Çubuğu */}
-      <div className="bg-gradient-to-r from-emerald-600 via-teal-600 to-indigo-700 rounded-3xl p-4 sm:p-5 text-white shadow-lg relative overflow-hidden">
-        {/* Subtle decorative glow */}
-        <div className="absolute top-0 right-0 w-48 h-48 bg-white/10 rounded-full blur-2xl -mr-12 -mt-12 pointer-events-none" />
-        
-        <div className="relative z-10 flex flex-col sm:flex-row sm:items-center justify-between gap-3.5">
-          <div className="flex items-center gap-3.5">
-            <div className="w-12 h-12 rounded-2xl bg-white/20 backdrop-blur-md flex items-center justify-center shrink-0 border border-white/30 shadow-inner">
-              <Smartphone className="h-6 w-6 text-emerald-100" />
-            </div>
-            <div>
-              <div className="flex items-center gap-2 flex-wrap">
-                <h2 className="text-sm sm:text-base font-black tracking-tight text-white flex items-center gap-1.5">
-                  Mobil Uygulama Kısayolu Ekle
-                </h2>
-                {isInstalled ? (
-                  <span className="text-[10px] font-black uppercase tracking-wider bg-emerald-400 text-slate-950 px-2 py-0.5 rounded-full flex items-center gap-1">
-                    <CheckCircle2 className="h-3 w-3" /> Yüklendi
-                  </span>
-                ) : (
-                  <span className="text-[10px] font-bold uppercase tracking-wider bg-white/20 text-emerald-100 px-2 py-0.5 rounded-full">
-                    Hızlı Erişim
-                  </span>
-                )}
-              </div>
-              <p className="text-xs text-emerald-100/90 mt-0.5 leading-relaxed">
-                {isInstalled 
-                  ? "DÖF Sistemi telefonunuzun ana ekranında yüklü ve tam ekran hızında hazır." 
-                  : "Uygulamayı telefonunuzun ana ekranına ekleyerek tek dokunuşla ve tam ekran açın."}
-              </p>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2 self-start sm:self-center shrink-0">
-            <button
-              type="button"
-              onClick={handleInstallClick}
-              className="inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-white hover:bg-emerald-50 text-emerald-900 text-xs font-black rounded-2xl shadow-md transition-all duration-150 cursor-pointer active:scale-95"
-              id="pwa-quick-install-btn"
-            >
-              <Download className="h-4 w-4 text-emerald-700" />
-              <span>{isInstalled ? "Yeniden Kısayol Ekle" : "Ana Ekrana Ekle"}</span>
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* 2. Hero Hoş Geldiniz & ISO 9001 Bilgilendirme */}
+      {/* 1. Hero Hoş Geldiniz & ISO 9001 Bilgilendirme */}
       <div className="bg-white border border-slate-200/90 rounded-3xl p-5 sm:p-6 shadow-xs relative overflow-hidden">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div className="space-y-1.5">
-            <div className="flex items-center gap-2">
-              <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-indigo-50 text-indigo-700 rounded-full font-bold text-[11px] border border-indigo-100">
-                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                ISO 9001:2015 Kalite Yönetim Sistemi
-              </span>
-              <span className="text-[11px] font-semibold text-slate-400">
-                Canlı Portal
-              </span>
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-indigo-50 text-indigo-700 rounded-full font-bold text-[11px] border border-indigo-100">
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                  ISO 9001:2015 Kalite Yönetim Sistemi
+                </span>
+                <span className="text-[11px] font-semibold text-slate-400">
+                  Canlı Portal
+                </span>
+              </div>
+
+              {/* Mobil Uygulama Kısayol Simgesi (Kompakt Rozet Buton) */}
+              <button
+                type="button"
+                onClick={handleInstallClick}
+                className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 rounded-full font-bold text-[11px] border border-emerald-200 transition shadow-2xs cursor-pointer active:scale-95"
+                title={isInstalled ? "Mobil Uygulama Kısayolu Yüklü" : "Mobil Uygulama Kısayolu Ekle"}
+              >
+                <Smartphone className="h-3.5 w-3.5 text-emerald-600" />
+                <span>{isInstalled ? "Kısayol Yüklü" : "Kısayol Ekle"}</span>
+              </button>
             </div>
             <h1 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">
               DÖF Hızlı Giriş & Mobil İşlem Portalı
@@ -473,187 +440,181 @@ export const DofMobilePortal: React.FC<DofMobilePortalProps> = ({
         </div>
       </div>
 
-      {/* 3. 4 BÜYÜK DİNAMİK AKSİYON KARTI (Yeni DÖF Bildir, Kamera ile QR kod Okut, DÖF Durumu Sorgula, Yönetici & Birim Giriş) */}
-      <div className="space-y-3">
+      {/* 3. HIZLI MENÜ & SAHA İŞLEM MERKEZLERİ (SADECE BUTON SİMGELER VE SAĞ ÜST KÖŞESİNDE ! AÇIKLAMA İŞARETİ) */}
+      <div className="space-y-3 relative">
         <div className="flex items-center justify-between px-1">
           <h2 className="text-xs font-black text-slate-600 uppercase tracking-wider flex items-center gap-1.5">
             <Sparkles className="h-4 w-4 text-indigo-600" />
             Hızlı Menü & Saha İşlem Merkezleri
           </h2>
           <span className="text-[11px] text-slate-400 font-semibold">
-            Dokunarak başlatın
+            Detay için (!) işaretinin üzerine gelin
           </span>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-          
-          {/* KART 1: Yeni DÖF Bildir */}
+        {/* Global transparent overlay to close tooltip on mobile click outside */}
+        {activeTooltip && (
           <div 
-            onClick={() => onNavigate("submit")}
-            className="group bg-gradient-to-br from-indigo-500 via-indigo-600 to-indigo-700 text-white rounded-3xl p-5 shadow-md hover:shadow-xl transition-all duration-200 cursor-pointer active:scale-[0.98] flex flex-col justify-between relative overflow-hidden"
-            id="portal-card-submit"
-          >
-            <div className="absolute top-0 right-0 w-32 h-32 bg-white/10 rounded-full -mr-8 -mt-8 pointer-events-none transition group-hover:scale-125" />
-            
-            <div className="space-y-3.5 relative z-10">
-              <div className="flex items-center justify-between">
-                <div className="w-13 h-13 rounded-2xl bg-white/20 backdrop-blur-md flex items-center justify-center shadow-md border border-white/25">
-                  <FileEdit className="h-7 w-7 text-white" />
-                </div>
-                <span className="text-[10px] font-black uppercase tracking-wider bg-white/20 text-indigo-100 px-3 py-1 rounded-full border border-white/20 flex items-center gap-1">
-                  <PlusSquare className="h-3 w-3" /> Hızlı Bildir
-                </span>
-              </div>
+            className="fixed inset-0 z-30 bg-transparent" 
+            onClick={() => setActiveTooltip(null)} 
+          />
+        )}
 
-              <div>
-                <h3 className="text-lg font-black text-white tracking-tight leading-snug">
-                  Yeni DÖF Bildir
-                </h3>
-                <p className="text-xs text-indigo-100/90 mt-1 leading-relaxed">
-                  Sahada tespit ettiğiniz uygunsuzluk, arıza veya iyileştirme talebini fotoğraflı olarak hemen bildirin.
-                </p>
-              </div>
-            </div>
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 sm:gap-3.5">
+          {[
+            {
+              id: "install",
+              title: "Mobil Kısayol Ekle",
+              description: isInstalled
+                ? "DÖF Kalite Portalı telefonunuzun ana ekranında yüklü ve tam ekran hızında hazır. Yeniden yüklemek veya rehber için dokunabilirsiniz."
+                : "DÖF Kalite Portalı'nı telefonunuzun ana ekranına uygulama ikonu olarak ekleyip tek dokunuşla ve tam ekran hızında kullanın.",
+              icon: Smartphone,
+              bgGradient: "from-emerald-600 to-teal-700 hover:from-emerald-500 hover:to-teal-600",
+              shadowColor: "shadow-emerald-100",
+              action: handleInstallClick,
+            },
+            {
+              id: "submit",
+              title: "Yeni DÖF Bildir",
+              description: "Sahada tespit ettiğiniz uygunsuzluk, arıza veya iyileştirme talebini fotoğraflı olarak hemen bildirin.",
+              icon: FileEdit,
+              bgGradient: "from-indigo-600 to-indigo-700 hover:from-indigo-500 hover:to-indigo-600",
+              shadowColor: "shadow-indigo-100",
+              action: () => onNavigate("submit"),
+            },
+            {
+              id: "qr",
+              title: "Kamera ile QR Kod Okut",
+              description: "Makine, pano veya afiş üzerindeki DÖF QR kodunu kamerayla anında tarayarak doğrudan işleme geçin.",
+              icon: Camera,
+              bgGradient: "from-purple-600 to-fuchsia-700 hover:from-purple-500 hover:to-fuchsia-600",
+              shadowColor: "shadow-purple-100",
+              action: onOpenScanner,
+            },
+            {
+              id: "track",
+              title: "DÖF Durumu Sorgula",
+              description: "Referans numaranızı yazarak faaliyetin mevcut durumunu, sorumlu birimini ve çözüm aşamasını sorgulayın.",
+              icon: Search,
+              bgGradient: "from-sky-600 to-blue-700 hover:from-sky-500 hover:to-blue-600",
+              shadowColor: "shadow-sky-100",
+              action: () => onNavigate("track"),
+            },
+            {
+              id: "admin",
+              title: "Yönetici & Birim Girişi",
+              description: "Kalite yöneticisi veya ilgili departman sorumlusu paneline şifre veya yetki ile erişip faaliyetleri onaylayın.",
+              icon: Lock,
+              bgGradient: "from-slate-900 to-slate-950 hover:from-slate-800 hover:to-slate-900",
+              shadowColor: "shadow-slate-200",
+              action: () => onNavigate("admin"),
+            },
+          ].map((item, index) => {
+            const Icon = item.icon;
+            const isTooltipOpen = activeTooltip === item.id;
+            const isSpannedMobile = index === 4;
 
-            <div className="mt-4 pt-3 border-t border-white/20 flex items-center justify-between text-xs font-black text-indigo-100">
-              <span className="flex items-center gap-1">
-                Formu Doldur <ArrowRight className="h-3.5 w-3.5 group-hover:translate-x-1 transition" />
-              </span>
-              <span className="text-[10px] text-indigo-200 font-semibold">Fotoğraf & Kamera Desteği</span>
-            </div>
-          </div>
-
-          {/* KART 2: Kamera ile QR Kod Okut */}
-          <div 
-            onClick={onOpenScanner}
-            className="group bg-gradient-to-br from-purple-600 via-purple-700 to-fuchsia-800 text-white rounded-3xl p-5 shadow-md hover:shadow-xl transition-all duration-200 cursor-pointer active:scale-[0.98] flex flex-col justify-between relative overflow-hidden"
-            id="portal-card-qr-scan"
-          >
-            <div className="absolute top-0 right-0 w-32 h-32 bg-white/10 rounded-full -mr-8 -mt-8 pointer-events-none transition group-hover:scale-125" />
-            
-            <div className="space-y-3.5 relative z-10">
-              <div className="flex items-center justify-between">
-                <div className="w-13 h-13 rounded-2xl bg-white/20 backdrop-blur-md flex items-center justify-center shadow-md border border-white/25">
-                  <Camera className="h-7 w-7 text-white" />
-                </div>
-                <span className="text-[10px] font-black uppercase tracking-wider bg-white/20 text-purple-100 px-3 py-1 rounded-full border border-white/20 flex items-center gap-1">
-                  <QrCode className="h-3 w-3" /> Canlı Tarama
-                </span>
-              </div>
-
-              <div>
-                <h3 className="text-lg font-black text-white tracking-tight leading-snug">
-                  Kamera ile QR Kod Okut
-                </h3>
-                <p className="text-xs text-purple-100/90 mt-1 leading-relaxed">
-                  Makine, pano veya afiş üzerindeki DÖF QR kodunu kamerayla anında tarayarak doğrudan işleme geçin.
-                </p>
-              </div>
-            </div>
-
-            <div className="mt-4 pt-3 border-t border-white/20 flex items-center justify-between text-xs font-black text-purple-100">
-              <span className="flex items-center gap-1">
-                Kamerayı Aç <ArrowRight className="h-3.5 w-3.5 group-hover:translate-x-1 transition" />
-              </span>
-              <span className="text-[10px] text-purple-200 font-semibold">Otomatik Barkod Algılama</span>
-            </div>
-          </div>
-
-          {/* KART 3: DÖF Durumu Sorgula */}
-          <div 
-            className="group bg-gradient-to-br from-sky-600 via-blue-600 to-indigo-800 text-white rounded-3xl p-5 shadow-md hover:shadow-xl transition-all duration-200 flex flex-col justify-between relative overflow-hidden"
-            id="portal-card-track"
-          >
-            <div className="absolute top-0 right-0 w-32 h-32 bg-white/10 rounded-full -mr-8 -mt-8 pointer-events-none transition group-hover:scale-125" />
-            
-            <div className="space-y-3.5 relative z-10">
-              <div className="flex items-center justify-between">
-                <div 
-                  onClick={() => onNavigate("track")}
-                  className="w-13 h-13 rounded-2xl bg-white/20 backdrop-blur-md flex items-center justify-center shadow-md border border-white/25 cursor-pointer"
-                >
-                  <Search className="h-7 w-7 text-white" />
-                </div>
+            return (
+              <div 
+                key={item.id} 
+                className={`relative group ${isSpannedMobile ? "col-span-2 sm:col-span-1" : ""}`}
+              >
+                {/* Buton Şeklinde Simge */}
                 <button
                   type="button"
-                  onClick={() => onNavigate("track")}
-                  className="text-[10px] font-black uppercase tracking-wider bg-white/20 text-sky-100 px-3 py-1 rounded-full border border-white/20 flex items-center gap-1 cursor-pointer hover:bg-white/30 transition"
+                  onClick={item.action}
+                  className={`w-full min-h-[96px] sm:min-h-[110px] bg-gradient-to-br ${item.bgGradient} text-white rounded-2xl sm:rounded-3xl p-3 sm:p-4 shadow-md ${item.shadowColor} hover:shadow-lg transition-all duration-200 cursor-pointer active:scale-95 flex ${isSpannedMobile ? "flex-row sm:flex-col" : "flex-col"} items-center justify-center gap-2 relative overflow-hidden text-center`}
+                  id={`portal-btn-${item.id}`}
                 >
-                  Durum Takibi <ArrowRight className="h-3 w-3" />
+                  {/* Subtle glossy top corner glow */}
+                  <div className="absolute top-0 right-0 w-20 h-20 bg-white/10 rounded-full -mr-6 -mt-6 pointer-events-none" />
+
+                  {/* Simge Kutusu */}
+                  <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-2xl bg-white/20 backdrop-blur-xs flex items-center justify-center shrink-0 border border-white/25 shadow-inner transition group-hover:scale-105">
+                    <Icon className="h-5 w-5 sm:h-6 sm:w-6 text-white" />
+                  </div>
+
+                  {/* Buton Başlığı */}
+                  <span className="text-xs sm:text-sm font-black text-white tracking-tight leading-snug px-1">
+                    {item.title}
+                  </span>
                 </button>
-              </div>
 
-              <div>
-                <h3 className="text-lg font-black text-white tracking-tight leading-snug">
-                  DÖF Durumu Sorgula
-                </h3>
-                <p className="text-xs text-sky-100/90 mt-1 leading-relaxed">
-                  Referans numaranızı yazarak faaliyetin mevcut durumunu, sorumlu birimini ve çözüm aşamasını sorgulayın.
-                </p>
-              </div>
+                {/* Sağ Üst Köşede (!) Açıklama İşareti */}
+                <div className="absolute top-2 right-2 z-20">
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      e.preventDefault();
+                      setActiveTooltip(isTooltipOpen ? null : item.id);
+                    }}
+                    onMouseEnter={() => setActiveTooltip(item.id)}
+                    onMouseLeave={() => setActiveTooltip(null)}
+                    className="w-5 h-5 rounded-full bg-white/25 hover:bg-white/40 text-white font-black text-[11px] leading-none flex items-center justify-center shadow-xs cursor-pointer border border-white/40 backdrop-blur-xs transition hover:scale-110 active:scale-90"
+                    title={`${item.title} açıklamasını gör`}
+                    aria-label={`${item.title} Bilgisi`}
+                  >
+                    !
+                  </button>
 
-              {/* In-Card Quick Search Form */}
-              <form onSubmit={handleQuickSubmitSearch} className="pt-1 flex gap-2">
-                <input
-                  type="text"
-                  value={quickRefInput}
-                  onChange={(e) => setQuickRefInput(e.target.value)}
-                  placeholder="Örn: DOF-2026-..."
-                  className="flex-1 px-3 py-2 text-xs font-mono font-bold bg-white text-slate-900 placeholder-slate-400 rounded-xl outline-none shadow-inner"
-                />
-                <button
-                  type="submit"
-                  className="px-3.5 py-2 bg-amber-400 hover:bg-amber-300 text-slate-950 text-xs font-black rounded-xl shadow-md transition cursor-pointer active:scale-95"
-                >
-                  Sorgula
-                </button>
-              </form>
-            </div>
+                  {/* (!) İşaretinin Üzerine Gelindiğinde / Dokunulduğunda Açılan Açıklama Balonu */}
+                  {isTooltipOpen && (
+                    <div 
+                      onClick={(e) => e.stopPropagation()}
+                      onMouseEnter={() => setActiveTooltip(item.id)}
+                      onMouseLeave={() => setActiveTooltip(null)}
+                      className={`absolute top-7 w-64 sm:w-72 p-3.5 bg-slate-900/95 backdrop-blur-md text-white text-left rounded-2xl shadow-2xl border border-slate-700/80 z-40 animate-fade-in pointer-events-auto ${
+                        index % 2 === 0 && index !== 4 ? "left-0 sm:left-0 lg:left-0" : "right-0"
+                      }`}
+                    >
+                      {/* Triangle Pointer */}
+                      <div className={`absolute -top-1.5 w-3 h-3 bg-slate-900/95 border-t border-l border-slate-700/80 rotate-45 ${
+                        index % 2 === 0 && index !== 4 ? "left-8 sm:left-8" : "right-3"
+                      }`} />
 
-            <div className="mt-4 pt-3 border-t border-white/20 flex items-center justify-between text-xs font-black text-sky-100">
-              <span className="flex items-center gap-1">
-                Canlı Arama & Takip
-              </span>
-              <span className="text-[10px] text-sky-200 font-semibold">Tüm Süreçler</span>
-            </div>
-          </div>
+                      <div className="flex items-center justify-between pb-1.5 mb-1.5 border-b border-slate-800">
+                        <span className="font-extrabold text-xs text-amber-300 flex items-center gap-1.5">
+                          <Icon className="h-3.5 w-3.5 text-amber-400" />
+                          <span>{item.title}</span>
+                        </span>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setActiveTooltip(null);
+                          }}
+                          className="text-slate-400 hover:text-white p-0.5 rounded transition"
+                          title="Kapat"
+                        >
+                          <X className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
 
-          {/* KART 4: Yönetici & Birim Giriş */}
-          <div 
-            onClick={() => onNavigate("admin")}
-            className="group bg-gradient-to-br from-slate-900 via-slate-800 to-indigo-950 text-white rounded-3xl p-5 shadow-md hover:shadow-xl transition-all duration-200 cursor-pointer active:scale-[0.98] flex flex-col justify-between relative overflow-hidden"
-            id="portal-card-admin"
-          >
-            <div className="absolute top-0 right-0 w-32 h-32 bg-white/5 rounded-full -mr-8 -mt-8 pointer-events-none transition group-hover:scale-125" />
-            
-            <div className="space-y-3.5 relative z-10">
-              <div className="flex items-center justify-between">
-                <div className="w-13 h-13 rounded-2xl bg-white/10 backdrop-blur-md flex items-center justify-center shadow-md border border-white/15">
-                  <Lock className="h-7 w-7 text-indigo-300" />
+                      <p className="text-[11px] text-slate-200 leading-relaxed font-medium">
+                        {item.description}
+                      </p>
+
+                      <div className="mt-2 pt-2 border-t border-slate-800/80 flex justify-end">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setActiveTooltip(null);
+                            item.action();
+                          }}
+                          className="text-[10px] font-bold text-amber-300 hover:text-white flex items-center gap-1 cursor-pointer"
+                        >
+                          <span>Hemen Aç</span>
+                          <ArrowRight className="h-3 w-3" />
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
-                <span className="text-[10px] font-black uppercase tracking-wider bg-white/10 text-slate-300 px-3 py-1 rounded-full border border-white/10 flex items-center gap-1">
-                  <ShieldCheck className="h-3 w-3 text-emerald-400" /> Yönetici Paneli
-                </span>
               </div>
-
-              <div>
-                <h3 className="text-lg font-black text-white tracking-tight leading-snug">
-                  Yönetici & Birim Girişi
-                </h3>
-                <p className="text-xs text-slate-300 mt-1 leading-relaxed">
-                  Kalite yöneticisi veya ilgili departman sorumlusu paneline şifre veya yetki ile erişip faaliyetleri onaylayın.
-                </p>
-              </div>
-            </div>
-
-            <div className="mt-4 pt-3 border-t border-white/15 flex items-center justify-between text-xs font-black text-slate-200">
-              <span className="flex items-center gap-1">
-                Panele Giriş Yap <ArrowRight className="h-3.5 w-3.5 group-hover:translate-x-1 transition" />
-              </span>
-              <span className="text-[10px] text-slate-400 font-semibold">Güvenli Oturum</span>
-            </div>
-          </div>
-
+            );
+          })}
         </div>
       </div>
 

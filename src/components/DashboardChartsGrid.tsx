@@ -28,8 +28,10 @@ import { DofDashboardChart } from "./DofDashboardChart";
 import { DofDeadlineSummaryChart } from "./DofDeadlineSummaryChart";
 import { DofDeptChart } from "./DofDeptChart";
 import { DofUpcomingDeadlines } from "./DofUpcomingDeadlines";
+import { DofOverviewKpiChart } from "./DofOverviewKpiChart";
 
 export type ChartId =
+  | "overview_kpi"
   | "monthly_distribution"
   | "status_donut"
   | "status_summary"
@@ -48,6 +50,15 @@ export interface ChartConfigItem {
 }
 
 export const ALL_CHARTS_CONFIG: ChartConfigItem[] = [
+  {
+    id: "overview_kpi",
+    title: "Toplam DÖF Sayısı, Bekleyen Faaliyetler ve Tamamlanma Oranları Grafiği",
+    shortTitle: "Toplam, Bekleyen & Tamamlanma",
+    description: "Toplam DÖF hacmi, açık/bekleyen süreçler ve tamamlanma başarı oranları",
+    defaultColSpan: 2,
+    icon: BarChart3,
+    category: "genel",
+  },
   {
     id: "monthly_distribution",
     title: "Toplam DÖF Sayıları ve Aylık Dağılım Grafiği",
@@ -338,6 +349,22 @@ export const DashboardChartsGrid: React.FC<DashboardChartsGridProps> = ({
   // Render chart component based on ID
   const renderChartComponent = (id: ChartId) => {
     switch (id) {
+      case "overview_kpi":
+        return (
+          <DofOverviewKpiChart
+            dofs={visibleDofs}
+            totalCount={visibleDofs.length}
+            resolvedCount={resolvedCount}
+            openCount={newCount + reviewCount}
+            newCount={newCount}
+            reviewCount={reviewCount}
+            rejectedCount={rejectedCount}
+            onFilterClick={(statusKey) => {
+              setStatusFilter(statusKey);
+              setAdminSubTab("dofs");
+            }}
+          />
+        );
       case "monthly_distribution":
         return <DofMonthlyDistributionChart dofs={visibleDofs} />;
       case "status_donut":

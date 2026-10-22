@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 import { 
   CheckCircle2, 
   Clock, 
@@ -9,8 +9,13 @@ import {
   AlertTriangle,
   ArrowRight,
   Filter,
-  Layers
+  Layers,
+  BarChart3,
+  ChevronDown,
+  ChevronUp
 } from "lucide-react";
+import { DofForm } from "../types";
+import { DofOverviewKpiChart } from "./DofOverviewKpiChart";
 
 interface DofExecutiveSummaryCardProps {
   totalCount: number;
@@ -27,6 +32,8 @@ interface DofExecutiveSummaryCardProps {
   onFilterClick?: (status: string, type?: string) => void;
   statusFilter?: string;
   typeFilter?: string;
+  dofs?: DofForm[];
+  initialShowChart?: boolean;
 }
 
 export const DofExecutiveSummaryCard: React.FC<DofExecutiveSummaryCardProps> = ({
@@ -44,7 +51,17 @@ export const DofExecutiveSummaryCard: React.FC<DofExecutiveSummaryCardProps> = (
   onFilterClick,
   statusFilter = "acik",
   typeFilter = "all",
+  dofs = [],
+  initialShowChart = true,
 }) => {
+  const [showChartArea, setShowChartArea] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem("dof_executive_show_chart");
+      if (saved !== null) return saved === "true";
+    } catch {}
+    return initialShowChart;
+  });
+
   // Calculations
   const completedRate = totalCount > 0 ? (resolvedCount / totalCount) * 100 : 0;
   const ongoingRate = totalCount > 0 ? (openCount / totalCount) * 100 : 0;
@@ -90,13 +107,37 @@ export const DofExecutiveSummaryCard: React.FC<DofExecutiveSummaryCardProps> = (
         </div>
 
         {/* Quick Summary Pill / Action */}
-        <div className="flex items-center gap-2 self-start sm:self-auto">
+        <div className="flex items-center gap-2 self-start sm:self-auto flex-wrap">
           {urgentCount > 0 && (
             <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-rose-50 text-rose-700 border border-rose-200 rounded-xl text-xs font-bold animate-pulse">
               <AlertTriangle className="h-3.5 w-3.5 text-rose-600" />
               <span>{urgentCount} Acil Termin</span>
             </span>
           )}
+
+          {/* Grafik Alanı Aç/Kapat Butonu */}
+          <button
+            type="button"
+            onClick={() => {
+              const next = !showChartArea;
+              setShowChartArea(next);
+              try {
+                localStorage.setItem("dof_executive_show_chart", String(next));
+              } catch {}
+            }}
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-xl border transition cursor-pointer ${
+              showChartArea
+                ? "bg-indigo-600 text-white border-indigo-600 shadow-xs hover:bg-indigo-700"
+                : "bg-white hover:bg-slate-50 text-indigo-700 border-indigo-200"
+            }`}
+            title="Toplam DÖF sayısı, bekleyen faaliyetler ve tamamlanma grafik alanını göster / gizle"
+            id="toggle-kpi-chart-btn"
+          >
+            <BarChart3 className="h-3.5 w-3.5" />
+            <span>{showChartArea ? "Grafiği Gizle" : "Grafik Alanı"}</span>
+            {showChartArea ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+          </button>
+
           {onFilterClick && (
             <button
               type="button"
