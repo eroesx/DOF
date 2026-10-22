@@ -61,6 +61,8 @@ export interface PanelUser {
   password?: string;
   department?: string;
   canSeeAllDofs?: boolean;
+  canEditDof?: boolean; // Yetkili Düzenle
+  isActive?: boolean;   // Kullanıcı Aktif / Pasif
   createdAt: any;
   updatedAt: any;
 }

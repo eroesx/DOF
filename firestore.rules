@@ -54,12 +54,15 @@ service cloud.firestore {
     // Helper to validate a PanelUser
     function isValidPanelUser(data) {
       return data.keys().hasAll(['email', 'name', 'role', 'createdAt', 'updatedAt'])
-        && data.keys().size() <= 9
+        && data.keys().size() <= 20
         && data.email is string && data.email.size() <= 200
         && data.name is string && data.name.size() <= 200
         && data.role is string && (data.role == 'admin' || data.role == 'editor' || data.role == 'viewer')
         && (!data.keys().hasAny(['password']) || data.password is string)
         && (!data.keys().hasAny(['department']) || data.department is string)
+        && (!data.keys().hasAny(['canSeeAllDofs']) || data.canSeeAllDofs is bool)
+        && (!data.keys().hasAny(['canEditDof']) || data.canEditDof is bool)
+        && (!data.keys().hasAny(['isActive']) || data.isActive is bool)
         && (!data.keys().hasAny(['id']) || data.id is string);
     }
 
