@@ -361,18 +361,18 @@ export default function DofTrack({ initialRefNo }: DofTrackProps) {
                   type="button"
                   onClick={() => handleExportPdf(dof)}
                   disabled={isPdfExporting[dof.id]}
-                  className="inline-flex items-center gap-1.5 px-3 py-1 bg-white hover:bg-indigo-50 border border-slate-200 hover:border-indigo-400 text-slate-700 hover:text-indigo-700 rounded-full text-xs font-semibold transition shadow-2xs cursor-pointer active:scale-95 disabled:opacity-60"
-                  title="Bu DÖF kaydını şık bir PDF belgesi olarak dışa aktar ve indir"
-                  id={`track-export-pdf-btn-${dof.refNo}`}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white border border-indigo-600 hover:border-indigo-700 rounded-full text-xs font-bold transition shadow-md shadow-indigo-200 hover:shadow-indigo-300 cursor-pointer active:scale-95 disabled:opacity-60"
+                  title="Bu DÖF kaydını şık bir ISO 9001 PDF belgesi olarak dışa aktar ve indir"
+                  id="dof-track-pdf-export-btn"
                 >
                   {isPdfExporting[dof.id] ? (
                     <>
-                      <div className="animate-spin h-3.5 w-3.5 border-2 border-indigo-600 border-t-transparent rounded-full" />
+                      <div className="animate-spin h-3.5 w-3.5 border-2 border-white border-t-transparent rounded-full" />
                       <span>PDF Hazırlanıyor...</span>
                     </>
                   ) : (
                     <>
-                      <Download className="h-3.5 w-3.5 text-indigo-600" />
+                      <Download className="h-3.5 w-3.5 text-white" />
                       <span>PDF Olarak Kaydet</span>
                     </>
                   )}

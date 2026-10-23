@@ -22,6 +22,7 @@ import {
   Send,
   Eye,
   Trash2,
+  Ban,
   PieChart,
   Grid,
   Users,
@@ -118,7 +119,9 @@ import {
   getStoredSettings,
   syncSettingsFromFirestore,
   saveSystemSettings,
-  getRemainingBusinessDays
+  getRemainingBusinessDays,
+  getAppVersion,
+  DEFAULT_APP_VERSION
 } from "../lib/settings";
 
 /**
@@ -131,9 +134,17 @@ export function isUserAuthorizedForDof(user: PanelUser | null, dof: DofForm): bo
   if (!user) return false;
 
   const userEmail = (user.email || "").trim().toLowerCase();
-  
-  // Tam yetkili sistem yöneticisi veya süper yönetici tüm DÖF'leri görebilir
-  if (user.role === "admin" || userEmail === "gokhan.eroglu@gmail.com") {
+  const isSuper = user.role === "admin" || userEmail === "gokhan.eroglu@gmail.com";
+
+  // 1. Reddedilen DÖF'leri SADECE en üst yetkili (sistem yöneticisi / admin) görüntüleyebilir
+  const st = (dof.status || "").toLowerCase().trim();
+  const isRejected = st === "reddedildi" || st === "iptal";
+  if (isRejected && !isSuper) {
+    return false;
+  }
+
+  // 2. Tam yetkili sistem yöneticisi veya süper yönetici tüm DÖF'leri görebilir
+  if (isSuper) {
     return true;
   }
 
@@ -355,7 +366,23 @@ export default function DofAdmin() {
   const [logSearchTerm, setLogSearchTerm] = useState<string>("");
 
   // Active panel user state & filters
-  const [activePanelUser, setActivePanelUser] = useState<PanelUser | null>(null);
+  const [activePanelUser, setActivePanelUser] = useState<PanelUser | null>(() => {
+    const savedEmail = localStorage.getItem("dof_admin_authed_email");
+    const savedRole = localStorage.getItem("dof_admin_user_role") as PanelUserRole | null;
+    const savedDept = localStorage.getItem("dof_admin_user_dept");
+    const savedName = localStorage.getItem("dof_admin_user_name");
+    if (savedEmail) {
+      return {
+        name: savedName || savedEmail.split("@")[0],
+        email: savedEmail,
+        role: savedRole || "editor",
+        department: savedDept || "",
+        createdAt: null,
+        updatedAt: null,
+      };
+    }
+    return null;
+  });
   const [referralFilter, setReferralFilter] = useState("all");
 
   // Layout customization states
@@ -456,9 +483,15 @@ export default function DofAdmin() {
   const [isAdminScannerOpen, setIsAdminScannerOpen] = useState(false);
   const [singleQrModalDof, setSingleQrModalDof] = useState<DofForm | null>(null);
   
-  // Admin DÖF Silme İşlemi State'leri
-  const [dofToDelete, setDofToDelete] = useState<DofForm | null>(null);
-  const [isDeletingDof, setIsDeletingDof] = useState(false);
+  // Admin DÖF Reddetme İşlemi State'leri (Silme kaldırıldı, sadece red etme)
+  const [dofToReject, setDofToReject] = useState<DofForm | null>(null);
+  const [rejectReason, setRejectReason] = useState("");
+  const [isRejectingDof, setIsRejectingDof] = useState(false);
+  
+  // Program Versiyonu State
+  const [appVersionSetting, setAppVersionSetting] = useState<string>(() => {
+    return getAppVersion();
+  });
   
   // Program Parametre & Veritabanı Ayarları States
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -566,6 +599,7 @@ export default function DofAdmin() {
     syncSettingsFromFirestore().then((s) => {
       setPreventiveDaysSetting(s.preventiveActionDays);
       setCorrectiveDaysSetting(s.correctiveActionDays);
+      if (s.appVersion) setAppVersionSetting(s.appVersion);
       if (s.defaultSoundSetting) setDefaultSoundSetting(s.defaultSoundSetting);
       if (s.defaultTabSetting) setDefaultTabSetting(s.defaultTabSetting);
       if (s.defaultStatusFilterSetting) {
@@ -601,7 +635,7 @@ export default function DofAdmin() {
   // Redirect to dashboard or fallback if current user doesn't have privileges
   useEffect(() => {
     if (activePanelUser) {
-      const isSystemAdmin = activePanelUser.role === "admin" || 
+      const isSystemAdmin = (activePanelUser.role === "admin" && (activePanelUser.email?.toLowerCase().trim() === "gokhan.eroglu@gmail.com" || !activePanelUser.department || activePanelUser.department === "Tüm Birimler")) ||
                             activePanelUser.email?.toLowerCase().trim() === "gokhan.eroglu@gmail.com";
       if (!isSystemAdmin) {
         if (adminSubTab === "users" || adminSubTab === "departments" || adminSubTab === "remote" || adminSubTab === "logs" || adminSubTab === "database") {
@@ -617,6 +651,13 @@ export default function DofAdmin() {
     try {
       const data = await listPanelUsers();
       setPanelUsers(data);
+      const savedEmail = localStorage.getItem("dof_admin_authed_email");
+      if (savedEmail) {
+        const found = data.find(u => u.email.toLowerCase().trim() === savedEmail.toLowerCase().trim());
+        if (found) {
+          setActivePanelUser(found);
+        }
+      }
       return data;
     } catch (err) {
       console.error("Failed to load panel users:", err);
@@ -1388,13 +1429,13 @@ export default function DofAdmin() {
     window.location.reload();
   };
 
-  const isSystemAdmin = activePanelUser?.role === "admin" || 
-                        activePanelUser?.email?.toLowerCase().trim() === "gokhan.eroglu@gmail.com" ||
-                        user?.email?.toLowerCase().trim() === "gokhan.eroglu@gmail.com" ||
-                        auth.currentUser?.email?.toLowerCase().trim() === "gokhan.eroglu@gmail.com" ||
-                        localStorage.getItem("dof_admin_user_role") === "admin" ||
-                        localStorage.getItem("dof_admin_passcode") === "admin" ||
-                        localStorage.getItem("dof_admin_authed_email")?.toLowerCase().trim() === "gokhan.eroglu@gmail.com";
+  const isSystemAdmin = 
+    (activePanelUser?.role === "admin" && (activePanelUser?.email?.toLowerCase().trim() === "gokhan.eroglu@gmail.com" || !activePanelUser?.department || activePanelUser?.department === "Tüm Birimler")) ||
+    (user?.email?.toLowerCase().trim() === "gokhan.eroglu@gmail.com") ||
+    (auth.currentUser?.email?.toLowerCase().trim() === "gokhan.eroglu@gmail.com") ||
+    (localStorage.getItem("dof_admin_user_role") === "admin" &&
+     localStorage.getItem("dof_admin_authed_email")?.toLowerCase().trim() !== "sahin@gmail.com" &&
+     (!localStorage.getItem("dof_admin_user_dept") || localStorage.getItem("dof_admin_user_dept") === "Tüm Birimler"));
 
   // Birim kullanıcısı (örn: sahin@gmail.com) KYS kontrol paneli olarak dashboard'da ve listelerde
   // sadece kendi birimine gelen bildirimleri ve DÖF'leri görür.
@@ -1414,17 +1455,22 @@ export default function DofAdmin() {
       dof.reporterName.toLowerCase().includes(searchTerm.toLowerCase()) ||
       dof.description.toLowerCase().includes(searchTerm.toLowerCase());
 
+    const st = (dof.status || "").toLowerCase().trim();
+    const isResolved = st === "cozuldu" || st === "çözüldü" || st === "tamamlandi" || st === "tamamlandı";
+    const isRejected = st === "reddedildi" || st === "iptal";
+    const isOpen = st === "yeni" || st === "inceleniyor";
+
     const matchesStatus = 
       statusFilter === "all" || 
       (statusFilter === "bekleyen" || statusFilter === "acik"
-        ? (dof.status === "yeni" || dof.status === "inceleniyor") 
+        ? isOpen
         : statusFilter === "kapali"
-        ? (dof.status === "cozuldu" || dof.status === "reddedildi")
+        ? (isResolved || (isSystemAdmin && isRejected))
         : (statusFilter === "iptal" || statusFilter === "reddedildi")
-        ? (dof.status === "reddedildi")
+        ? (isSystemAdmin && isRejected)
         : (statusFilter === "tamamlandi" || statusFilter === "cozuldu")
-        ? (dof.status === "cozuldu")
-        : dof.status === statusFilter);
+        ? isResolved
+        : st === statusFilter);
     const matchesType = typeFilter === "all" || dof.type === typeFilter;
     const matchesDept = deptFilter === "all" || dof.department === deptFilter;
 
@@ -1480,14 +1526,23 @@ export default function DofAdmin() {
     return matchesSearch && matchesStatus && matchesType && matchesDept && matchesReferral && matchesDate && matchesFolder;
   });
 
-  // Stats calculation
+  // Stats calculation - strictly based on visibleDofs
   const totalCount = visibleDofs.length;
-  const newCount = visibleDofs.filter((d) => d.status === "yeni").length;
-  const reviewCount = visibleDofs.filter((d) => d.status === "inceleniyor").length;
-  const resolvedCount = visibleDofs.filter((d) => d.status === "cozuldu").length;
-  const rejectedCount = visibleDofs.filter((d) => d.status === "reddedildi").length;
-  const openCount = visibleDofs.filter((d) => d.status === "yeni" || d.status === "inceleniyor").length;
-  const closedCount = visibleDofs.filter((d) => d.status === "cozuldu" || d.status === "reddedildi").length;
+  const newCount = visibleDofs.filter((d) => (d.status || "").toLowerCase().trim() === "yeni").length;
+  const reviewCount = visibleDofs.filter((d) => (d.status || "").toLowerCase().trim() === "inceleniyor").length;
+  const resolvedCount = visibleDofs.filter((d) => {
+    const st = (d.status || "").toLowerCase().trim();
+    return st === "cozuldu" || st === "çözüldü" || st === "tamamlandi" || st === "tamamlandı";
+  }).length;
+  const rejectedCount = isSystemAdmin ? visibleDofs.filter((d) => {
+    const st = (d.status || "").toLowerCase().trim();
+    return st === "reddedildi" || st === "iptal";
+  }).length : 0;
+  const openCount = visibleDofs.filter((d) => {
+    const st = (d.status || "").toLowerCase().trim();
+    return st === "yeni" || st === "inceleniyor";
+  }).length;
+  const closedCount = isSystemAdmin ? (resolvedCount + rejectedCount) : resolvedCount;
   const correctiveCount = visibleDofs.filter((d) => d.type === "düzeltici").length;
   const preventiveCount = visibleDofs.filter((d) => d.type === "önleyici").length;
   const myTasksCount = visibleDofs.filter((d) => 
@@ -3970,55 +4025,79 @@ export default function DofAdmin() {
     }
   };
 
-  const handleDeleteDof = (dofOrId: DofForm | string) => {
+  const handleRejectDof = (dofOrId: DofForm | string) => {
     if (typeof dofOrId === "string") {
       const target = dofs.find(d => d.id === dofOrId) || (selectedDof?.id === dofOrId ? selectedDof : null);
       if (target) {
-        setDofToDelete(target);
+        setDofToReject(target);
+        setRejectReason("");
       }
     } else if (dofOrId) {
-      setDofToDelete(dofOrId);
+      setDofToReject(dofOrId);
+      setRejectReason("");
     }
   };
 
-  const executeDeleteDof = async () => {
-    if (!dofToDelete?.id) return;
-    setIsDeletingDof(true);
+  const executeRejectDof = async () => {
+    if (!dofToReject?.id) return;
+    setIsRejectingDof(true);
     try {
-      const refNo = dofToDelete.refNo;
-      const actorName = activePanelUser?.name || user?.displayName || (user?.email ? user.email.split('@')[0] : "Süper Yönetici");
-      const actorEmail = activePanelUser?.email || user?.email || localStorage.getItem("dof_admin_authed_email") || "gokhan.eroglu@gmail.com";
-      const actorRole = activePanelUser?.role || localStorage.getItem("dof_admin_user_role") || "admin";
+      const refNo = dofToReject.refNo;
+      const actorName = activePanelUser?.name || user?.displayName || (user?.email ? user.email.split('@')[0] : "Yönetici");
+      const actorEmail = activePanelUser?.email || user?.email || localStorage.getItem("dof_admin_authed_email") || "yetkili@sirket.com";
+      const actorRole = activePanelUser?.role || localStorage.getItem("dof_admin_user_role") || "editor";
+      const reasonText = rejectReason.trim() || "DÖF başvurusu yetkili tarafından reddedildi.";
+      const nowIso = new Date().toISOString();
 
-      // Denetim günlüğüne kim tarafından silindiğini kaydet
+      const updates: Partial<DofForm> = {
+        status: "reddedildi",
+        referralStatus: "iptal",
+        currentStep: 8,
+        adminFeedback: reasonText,
+        updatedAt: nowIso,
+      };
+
+      await updateDof(dofToReject.id, updates);
+
+      // Audit log kaydı
       try {
-        const { logDofDeletion } = await import("../lib/notifications");
-        await logDofDeletion(dofToDelete, {
-          name: actorName,
-          email: actorEmail,
-          role: actorRole,
+        const { addDoc } = await import("firebase/firestore");
+        await addDoc(collection(db, "email_logs"), {
+          dofRefNo: refNo,
+          dofTitle: dofToReject.title,
+          actorName,
+          actorEmail,
+          actorRole,
+          recipient: dofToReject.reporterContact || dofToReject.assignedUserEmail || "-",
+          subject: `DÖF #${refNo} Reddedildi`,
+          body: `DÖF #${refNo} (${dofToReject.title}) başvurusu reddedildi.\nRed Gerekçesi: ${reasonText}\nİşlem Yapan: ${actorName} (${actorEmail})`,
+          sentAt: nowIso,
+          type: "dof_rejected",
         });
       } catch (logErr) {
-        console.warn("Could not log dof deletion:", logErr);
+        console.warn("Could not log dof rejection:", logErr);
       }
 
-      await deleteDof(dofToDelete.id);
-      
-      setDofs(prev => prev.filter(d => d.id !== dofToDelete.id));
-      if (selectedDof?.id === dofToDelete.id) {
-        setSelectedDof(null);
+      setDofs(prev => prev.map(d => d.id === dofToReject.id ? { ...d, ...updates } : d));
+      if (selectedDof?.id === dofToReject.id) {
+        if (!isSystemAdmin) {
+          setSelectedDof(null);
+        } else {
+          setSelectedDof(prev => prev ? { ...prev, ...updates } : null);
+        }
       }
-      
+
       await fetchAllDofs();
       fetchLogs();
-      setDofToDelete(null);
-      setWorkflowNotice(`✓ DÖF #${refNo} kaydı ${actorName} tarafından başarıyla silindi.`);
+      setDofToReject(null);
+      setRejectReason("");
+      setWorkflowNotice(`✓ DÖF #${refNo} başarıyla reddedildi.`);
       setTimeout(() => setWorkflowNotice(null), 4000);
     } catch (err) {
-      console.error("DÖF silme hatası:", err);
-      alert("Kayıt silinirken bir hata oluştu.");
+      console.error("DÖF reddetme hatası:", err);
+      alert("DÖF reddedilirken bir hata oluştu.");
     } finally {
-      setIsDeletingDof(false);
+      setIsRejectingDof(false);
     }
   };
 
@@ -4590,9 +4669,14 @@ export default function DofAdmin() {
                           <h2 className="font-display font-bold text-white text-xs leading-none truncate">
                             {isSystemAdmin ? "DÖF Yönetim Paneli" : "KYS Kontrol Paneli"}
                           </h2>
-                          <span className="text-[10px] font-semibold text-slate-400 tracking-wider block mt-1 uppercase truncate max-w-[170px]">
-                            {isSystemAdmin ? "YÖNETİCİ PANELİ" : (activePanelUser?.department || "BİRİM PANELİ")}
-                          </span>
+                          <div className="flex items-center gap-1.5 mt-1">
+                            <span className="text-[10px] font-semibold text-slate-400 tracking-wider uppercase truncate max-w-[130px]">
+                              {isSystemAdmin ? "YÖNETİCİ PANELİ" : (activePanelUser?.department || "BİRİM PANELİ")}
+                            </span>
+                            <span className="text-[9px] font-mono font-bold px-1.5 py-0.2 rounded bg-slate-800 text-indigo-300 border border-slate-700">
+                              {appVersionSetting}
+                            </span>
+                          </div>
                         </div>
                       )}
                     </div>
@@ -5004,6 +5088,9 @@ export default function DofAdmin() {
                     ? "GÜVENLİ YÖNETİCİ PANELİ" 
                     : `KYS BİRİM KONTROL PANELİ • ${activePanelUser?.department || "BİRİMİNİZ"}`}
                 </span>
+                <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200">
+                  {appVersionSetting}
+                </span>
               </div>
             </div>
 
@@ -5204,21 +5291,23 @@ export default function DofAdmin() {
               <span className="text-[9px] font-medium text-emerald-400 block mt-0.5">Filtrele</span>
             </button>
 
-            <button
-              onClick={() => {
-                setStatusFilter("reddedildi");
-                setAdminSubTab("dofs");
-              }}
-              className={`p-4 rounded-2xl shadow-sm text-center transition-all duration-300 cursor-pointer outline-none ${
-                statusFilter === "reddedildi"
-                  ? "bg-rose-50 border-2 border-rose-400 ring-4 ring-rose-500/10"
-                  : "bg-rose-50/20 border border-rose-100/70 hover:bg-rose-50/40 hover:border-rose-200"
-              }`}
-            >
-              <span className="text-[10px] font-bold text-rose-500 tracking-wider uppercase block">Reddedildi</span>
-              <span className="text-3xl font-display font-bold text-rose-700 block mt-1">{rejectedCount}</span>
-              <span className="text-[9px] font-medium text-rose-400 block mt-0.5">Filtrele</span>
-            </button>
+            {isSystemAdmin && (
+              <button
+                onClick={() => {
+                  setStatusFilter("reddedildi");
+                  setAdminSubTab("dofs");
+                }}
+                className={`p-4 rounded-2xl shadow-sm text-center transition-all duration-300 cursor-pointer outline-none ${
+                  statusFilter === "reddedildi"
+                    ? "bg-rose-50 border-2 border-rose-400 ring-4 ring-rose-500/10"
+                    : "bg-rose-50/20 border border-rose-100/70 hover:bg-rose-50/40 hover:border-rose-200"
+                }`}
+              >
+                <span className="text-[10px] font-bold text-rose-500 tracking-wider uppercase block">Reddedildi</span>
+                <span className="text-3xl font-display font-bold text-rose-700 block mt-1">{rejectedCount}</span>
+                <span className="text-[9px] font-medium text-rose-400 block mt-0.5">Filtrele</span>
+              </button>
+            )}
           </div>
         )}
 
@@ -6717,12 +6806,12 @@ export default function DofAdmin() {
                         >
                           <option value="acik">🟢 Açık & İşlemde (Yeni & İnceleniyor)</option>
                           <option value="all">Tümü (Filtresiz)</option>
-                          <option value="kapali">🔴 Kapalı (Çözüldü & Red)</option>
+                          <option value="kapali">{isSystemAdmin ? "🔴 Kapalı (Çözüldü & Red)" : "🟢 Çözülenler (Kapatılan)"}</option>
                           <option value="bekleyen">Bekleyenler</option>
                           <option value="yeni">Yeni Başvuru</option>
                           <option value="inceleniyor">İnceleniyor</option>
                           <option value="cozuldu">Çözüldü</option>
-                          <option value="reddedildi">Reddedildi</option>
+                          {isSystemAdmin && <option value="reddedildi">Reddedildi</option>}
                         </select>
                       </div>
 
@@ -7007,19 +7096,21 @@ export default function DofAdmin() {
                     <span className="text-[10px] font-mono opacity-80">({closedCount})</span>
                   </button>
 
-                  <button
-                    type="button"
-                    onClick={() => setStatusFilter(statusFilter === "reddedildi" ? "all" : "reddedildi")}
-                    className={`px-2.5 py-1 rounded-lg text-xs font-bold transition cursor-pointer flex items-center gap-1 ${
-                      statusFilter === "reddedildi"
-                        ? "bg-rose-600 text-white"
-                        : "bg-white text-rose-700 hover:bg-rose-50 border border-rose-200"
-                    }`}
-                  >
-                    <XCircle className="h-3 w-3" />
-                    <span>Reddedilen / İptal</span>
-                    <span className="text-[10px] font-mono opacity-80">({rejectedCount})</span>
-                  </button>
+                  {isSystemAdmin && (
+                    <button
+                      type="button"
+                      onClick={() => setStatusFilter(statusFilter === "reddedildi" ? "all" : "reddedildi")}
+                      className={`px-2.5 py-1 rounded-lg text-xs font-bold transition cursor-pointer flex items-center gap-1 ${
+                        statusFilter === "reddedildi"
+                          ? "bg-rose-600 text-white"
+                          : "bg-white text-rose-700 hover:bg-rose-50 border border-rose-200"
+                      }`}
+                    >
+                      <XCircle className="h-3 w-3" />
+                      <span>Reddedilen / İptal</span>
+                      <span className="text-[10px] font-mono opacity-80">({rejectedCount})</span>
+                    </button>
+                  )}
                 </div>
               </div>
 
@@ -7485,18 +7576,18 @@ export default function DofAdmin() {
                               >
                                 <Smartphone className="h-3.5 w-3.5" />
                               </a>
-                              {isSystemAdmin && (
+                              {dof.status !== "reddedildi" && (
                                 <button
                                   type="button"
                                   onClick={(e) => {
                                     e.stopPropagation();
                                     e.preventDefault();
-                                    handleDeleteDof(dof);
+                                    handleRejectDof(dof);
                                   }}
                                   className="p-1.5 bg-rose-50 hover:bg-rose-100 hover:text-rose-700 text-rose-600 rounded-lg transition cursor-pointer"
-                                  title="DÖF Kaydını Sil (Yönetici Yetkisi)"
+                                  title="DÖF Başvurusunu Reddet"
                                 >
-                                  <Trash2 className="h-3.5 w-3.5" />
+                                  <Ban className="h-3.5 w-3.5" />
                                 </button>
                               )}
                             </div>
@@ -7619,18 +7710,18 @@ export default function DofAdmin() {
                     >
                       <Printer className="h-4 w-4 text-emerald-600" /> Yatık Çıktı (Önce / Sonra)
                     </button>
-                    {isSystemAdmin && (
+                    {selectedDof.status !== "reddedildi" && (
                       <button
                         type="button"
                         onClick={(e) => {
                           e.stopPropagation();
                           e.preventDefault();
-                          handleDeleteDof(selectedDof);
+                          handleRejectDof(selectedDof);
                         }}
-                        className="p-2 text-rose-500 hover:text-rose-700 hover:bg-rose-50 rounded-xl transition cursor-pointer"
-                        title="DÖF Kaydını Sil (Yönetici Yetkisi)"
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-rose-50 hover:bg-rose-100 active:bg-rose-200 text-rose-700 font-bold rounded-xl text-xs transition cursor-pointer border border-rose-200"
+                        title="DÖF Başvurusunu Reddet"
                       >
-                        <Trash2 className="h-4.5 w-4.5" />
+                        <Ban className="h-4 w-4 text-rose-600" /> Reddet
                       </button>
                     )}
                     <button
@@ -8812,6 +8903,40 @@ export default function DofAdmin() {
                     </span>
                   </label>
                 </div>
+
+                {/* 6. Versiyon / Sürüm Bilgisi (Elle Düzenleme) */}
+                <div className="space-y-1.5 pt-1 bg-gradient-to-br from-indigo-50/50 to-white border border-indigo-100 rounded-2xl p-4 shadow-2xs">
+                  <div className="flex items-center justify-between mb-1">
+                    <div className="flex items-center gap-2">
+                      <span className="w-6 h-6 rounded-lg bg-indigo-600 text-white font-mono font-bold text-xs flex items-center justify-center">
+                        v
+                      </span>
+                      <div>
+                        <label className="text-[11px] font-bold text-slate-900 uppercase tracking-wide">
+                          Uygulama Versiyon Bilgisi (Sürüm)
+                        </label>
+                        <p className="text-[10px] text-slate-500">
+                          Panelde, arayüzde ve raporlarda gösterilen sistem sürüm numarası
+                        </p>
+                      </div>
+                    </div>
+                    <span className="text-[10px] font-mono font-bold bg-indigo-100 text-indigo-800 px-2.5 py-0.5 rounded-full border border-indigo-200">
+                      {appVersionSetting || DEFAULT_APP_VERSION}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2 pt-1">
+                    <input
+                      type="text"
+                      value={appVersionSetting}
+                      onChange={(e) => setAppVersionSetting(e.target.value)}
+                      placeholder="Örn: v1.2.5"
+                      className="w-full bg-white border border-slate-200 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 rounded-xl px-3 py-2 text-xs font-mono font-bold text-slate-800 outline-none transition"
+                    />
+                  </div>
+                  <p className="text-[9px] text-slate-400">
+                    * İstediğiniz sürüm kodunu (örneğin v1.2.6 veya v2.0.0) elle girip kaydedebilirsiniz.
+                  </p>
+                </div>
               </div>
             )}
 
@@ -8866,6 +8991,7 @@ export default function DofAdmin() {
                         setDefaultNotificationSetting("on");
                         setIsPasscodeLoginPassive(false);
                         setIsKvkkMaskingEnabled(false);
+                        setAppVersionSetting(DEFAULT_APP_VERSION);
                         
                         await saveSystemSettings({
                           preventiveActionDays: 7,
@@ -8876,7 +9002,9 @@ export default function DofAdmin() {
                           defaultNotificationSetting: "on",
                           isPasscodeLoginPassive: false,
                           isKvkkMaskingEnabled: false,
+                          appVersion: DEFAULT_APP_VERSION,
                         });
+                        localStorage.setItem("dof_app_version", DEFAULT_APP_VERSION);
                         
                         setIsMuted(false);
                         setIsSettingsOpen(false);
@@ -8899,6 +9027,7 @@ export default function DofAdmin() {
                       onClick={async () => {
                         const prev = Number(preventiveDaysSetting) || 7;
                         const corr = Number(correctiveDaysSetting) || 3;
+                        const ver = appVersionSetting.trim() || DEFAULT_APP_VERSION;
 
                         await saveSystemSettings({
                           preventiveActionDays: prev,
@@ -8909,7 +9038,9 @@ export default function DofAdmin() {
                           defaultNotificationSetting: defaultNotificationSetting as any,
                           isPasscodeLoginPassive,
                           isKvkkMaskingEnabled,
+                          appVersion: ver,
                         });
+                        localStorage.setItem("dof_app_version", ver);
                         
                         // Apply immediately
                         if (defaultSoundSetting === "on") {
@@ -9095,15 +9226,15 @@ export default function DofAdmin() {
         </div>
       )}
 
-      {/* Admin DÖF Silme Onay Modalı (En üst katmanda z-[99999] olarak gösterilir) */}
+      {/* Admin DÖF Reddetme Onay Modalı */}
       <AnimatePresence>
-        {dofToDelete && (
+        {dofToReject && (
           <div className="fixed inset-0 z-[99999] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-fade-in">
             {/* Backdrop click to dismiss */}
             <div 
               className="absolute inset-0"
               onClick={() => {
-                if (!isDeletingDof) setDofToDelete(null);
+                if (!isRejectingDof) setDofToReject(null);
               }}
             />
 
@@ -9119,14 +9250,14 @@ export default function DofAdmin() {
               <div className="px-6 py-4 bg-rose-50 border-b border-rose-100 flex items-center justify-between">
                 <div className="flex items-center gap-2.5">
                   <div className="w-10 h-10 rounded-xl bg-rose-600 text-white flex items-center justify-center shadow-md shadow-rose-200 shrink-0">
-                    <Trash2 className="h-5 w-5" />
+                    <Ban className="h-5 w-5" />
                   </div>
                   <div>
                     <h3 className="text-sm font-black text-rose-950">
-                      DÖF Kaydı Silme Onayı
+                      DÖF Başvurusunu Reddet
                     </h3>
                     <span className="text-[10px] font-bold text-rose-700 uppercase tracking-wider block">
-                      Geri Alınamaz Yönetici İşlemi
+                      Uygunsuzluk / Talep İptali
                     </span>
                   </div>
                 </div>
@@ -9134,7 +9265,7 @@ export default function DofAdmin() {
                 <button
                   type="button"
                   onClick={() => {
-                    if (!isDeletingDof) setDofToDelete(null);
+                    if (!isRejectingDof) setDofToReject(null);
                   }}
                   className="p-1.5 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-white/80 transition cursor-pointer"
                   title="Pencereyi Kapat"
@@ -9147,10 +9278,10 @@ export default function DofAdmin() {
               <div className="p-6 space-y-4">
                 <div className="text-center space-y-1">
                   <h4 className="text-base font-black text-slate-900 leading-snug">
-                    DÖF Kaydını Silmek İstediğinize Emin Misiniz?
+                    Bu DÖF Başvurusunu Reddetmek İstediğinize Emin Misiniz?
                   </h4>
                   <p className="text-xs text-slate-500">
-                    Aşağıdaki başvuru veritabanından kalıcı olarak silinecektir:
+                    Reddedilen başvurular süreçten çıkarılır ve gizlilik ilkesi gereği yalnızca en üst yetkili tarafından görüntülenebilir:
                   </p>
                 </div>
 
@@ -9158,39 +9289,45 @@ export default function DofAdmin() {
                 <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 space-y-2 text-xs">
                   <div className="flex items-center justify-between gap-2 flex-wrap">
                     <span className="font-mono font-black text-xs text-indigo-700 bg-white px-2.5 py-1 rounded-lg border border-slate-200 shadow-2xs">
-                      #{dofToDelete.refNo}
+                      #{dofToReject.refNo}
                     </span>
                     <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-extrabold ${
-                      dofToDelete.type === "düzeltici" ? "bg-indigo-100 text-indigo-800 border border-indigo-200" : "bg-teal-100 text-teal-800 border border-teal-200"
+                      dofToReject.type === "düzeltici" ? "bg-indigo-100 text-indigo-800 border border-indigo-200" : "bg-teal-100 text-teal-800 border border-teal-200"
                     }`}>
-                      {dofToDelete.type === "düzeltici" ? "Düzeltici Faaliyet" : "Önleyici Faaliyet"}
+                      {dofToReject.type === "düzeltici" ? "Düzeltici Faaliyet" : "Önleyici Faaliyet"}
                     </span>
                   </div>
 
                   <div className="font-bold text-slate-900 text-sm leading-snug">
-                    {dofToDelete.title}
+                    {dofToReject.title}
                   </div>
 
                   <div className="grid grid-cols-2 gap-2 pt-2 text-[11px] text-slate-600 border-t border-slate-200/60">
                     <div>
                       <span className="text-[10px] text-slate-400 uppercase font-bold block">Departman</span>
-                      <span className="font-semibold text-slate-800">{dofToDelete.department || "-"}</span>
+                      <span className="font-semibold text-slate-800">{dofToReject.department || "-"}</span>
                     </div>
                     <div>
                       <span className="text-[10px] text-slate-400 uppercase font-bold block">Bildiren Kişi</span>
-                      <span className="font-semibold text-slate-800">{getMaskedReporterName(dofToDelete.reporterName)}</span>
+                      <span className="font-semibold text-slate-800">{getMaskedReporterName(dofToReject.reporterName)}</span>
                     </div>
                   </div>
                 </div>
 
-                {/* Critical Security Warning */}
-                <div className="bg-rose-50/90 border border-rose-200 rounded-2xl p-3.5 text-[11px] text-rose-900 leading-relaxed space-y-1">
-                  <div className="flex items-center gap-1.5 font-black text-rose-950">
-                    <AlertTriangle className="h-4 w-4 text-rose-600 shrink-0" />
-                    <span>Kalıcı Silme & Denetim Uyarısı:</span>
-                  </div>
-                  <p className="pl-5 text-rose-800">
-                    Bu işlem bu bildirim kaydını veritabanından kalıcı olarak silecektir. Süreç notları, fotoğraflar ve yorumlar geri getirilemez. Bu silme işlemi kim tarafından silindiği bilgisiyle birlikte Sistem Denetim Loglarına kaydedilecektir.
+                {/* Red Gerekçesi Açıklama Alanı */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-slate-700 block">
+                    Red Gerekçesi / Açıklama Notu
+                  </label>
+                  <textarea
+                    rows={3}
+                    value={rejectReason}
+                    onChange={(e) => setRejectReason(e.target.value)}
+                    placeholder="Bu başvurunun neden reddedildiğini (örn: mükerrer kayıt, yetersiz kanıt, ilgili standart kapsamında değil vb.) yazın..."
+                    className="w-full bg-slate-50 focus:bg-white border border-slate-200 focus:border-rose-500 rounded-xl p-3 text-xs text-slate-800 outline-none transition"
+                  />
+                  <p className="text-[10px] text-slate-400">
+                    Bu açıklama sistem denetim kayıtlarına ve DÖF tarihçesine işlenecektir.
                   </p>
                 </div>
 
@@ -9198,27 +9335,27 @@ export default function DofAdmin() {
                 <div className="flex items-center gap-3 justify-center pt-2">
                   <button
                     type="button"
-                    onClick={() => setDofToDelete(null)}
-                    disabled={isDeletingDof}
+                    onClick={() => setDofToReject(null)}
+                    disabled={isRejectingDof}
                     className="flex-1 py-3 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl transition cursor-pointer disabled:opacity-50 text-center"
                   >
                     Vazgeç
                   </button>
                   <button
                     type="button"
-                    onClick={executeDeleteDof}
-                    disabled={isDeletingDof}
+                    onClick={executeRejectDof}
+                    disabled={isRejectingDof}
                     className="flex-1 py-3 px-4 bg-rose-600 hover:bg-rose-700 active:bg-rose-800 text-white text-xs font-black rounded-xl transition cursor-pointer shadow-md shadow-rose-200 flex items-center justify-center gap-2 disabled:opacity-50 text-center"
                   >
-                    {isDeletingDof ? (
+                    {isRejectingDof ? (
                       <>
                         <RefreshCw className="h-4 w-4 animate-spin" />
-                        <span>Siliniyor...</span>
+                        <span>Reddediliyor...</span>
                       </>
                     ) : (
                       <>
-                        <Trash2 className="h-4 w-4" />
-                        <span>Evet, Kalıcı Olarak Sil</span>
+                        <Ban className="h-4 w-4" />
+                        <span>DÖF'ü Reddet</span>
                       </>
                     )}
                   </button>

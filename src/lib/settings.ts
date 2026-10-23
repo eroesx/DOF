@@ -3,6 +3,7 @@ import { db } from "../firebase";
 
 export const DEFAULT_PREVENTIVE_DAYS = 7; // Önleyici Faaliyet: 7 İş Günü
 export const DEFAULT_CORRECTIVE_DAYS = 3;  // Düzenleyici / Düzeltici Faaliyet: 3 İş Günü
+export const DEFAULT_APP_VERSION = "v1.2.5"; // Uygulama Varsayılan Sürümü
 
 export interface SystemSettings {
   preventiveActionDays: number;
@@ -13,6 +14,12 @@ export interface SystemSettings {
   defaultNotificationSetting: "on" | "off";
   isPasscodeLoginPassive: boolean;
   isKvkkMaskingEnabled: boolean;
+  appVersion?: string;
+}
+
+export function getAppVersion(): string {
+  if (typeof window === "undefined") return DEFAULT_APP_VERSION;
+  return localStorage.getItem("dof_app_version") || DEFAULT_APP_VERSION;
 }
 
 export function isKvkkActive(): boolean {
@@ -239,6 +246,9 @@ export async function syncSettingsFromFirestore(): Promise<SystemSettings> {
           data.isPasscodeLoginPassive ? "true" : "false"
         );
       }
+      if (data.appVersion) {
+        localStorage.setItem("dof_app_version", data.appVersion);
+      }
     }
   } catch (err) {
     console.warn("Could not sync settings from Firestore:", err);
@@ -300,6 +310,9 @@ export async function saveSystemSettings(
       "dof_admin_kvkk_masking",
       settings.isKvkkMaskingEnabled ? "true" : "false"
     );
+  }
+  if (settings.appVersion) {
+    localStorage.setItem("dof_app_version", settings.appVersion);
   }
 
   // 2. Firestore güncelle
