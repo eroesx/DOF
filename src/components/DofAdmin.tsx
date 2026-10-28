@@ -88,7 +88,11 @@ import {
   moveDofsToFolder,
   removeDofsFromFolder,
   handleFirestoreError,
-  OperationType
+  OperationType,
+  filterAuthorizedDofs,
+  accessFilter,
+  authorizedQuery,
+  getCurrentUserAuthContext
 } from "../lib/db";
 import { 
   DofForm, 
@@ -131,10 +135,18 @@ import {
  * - Yetkisi olmayan hiçbir kullanıcı diğer birimlerin verilerini göremez.
  */
 export function isUserAuthorizedForDof(user: PanelUser | null, dof: DofForm): boolean {
-  if (!user) return false;
+  // Read effective credentials from user or localStorage session fallback
+  const effectiveEmail = (user?.email || localStorage.getItem("dof_admin_authed_email") || "").trim().toLowerCase();
+  const effectiveRole = (user?.role || localStorage.getItem("dof_admin_user_role") || "").trim().toLowerCase();
+  const effectiveDept = (user?.department || localStorage.getItem("dof_admin_user_dept") || "").trim();
+  const effectiveCanSeeAll = user?.canSeeAllDofs || false;
 
-  const userEmail = (user.email || "").trim().toLowerCase();
-  const isSuper = user.role === "admin" || userEmail === "gokhan.eroglu@gmail.com";
+  if (!effectiveEmail && !user) return false;
+
+  // sahin@gmail.com or users with specific departments are strictly department users, NEVER super admin
+  const isSuper = effectiveEmail !== "sahin@gmail.com" &&
+    ((effectiveRole === "admin" && (!effectiveDept || effectiveDept === "Tüm Birimler" || effectiveDept.toLowerCase() === "tüm birimler")) ||
+     (effectiveEmail === "gokhan.eroglu@gmail.com" && (!effectiveDept || effectiveDept === "Tüm Birimler")));
 
   // 1. Reddedilen DÖF'leri SADECE en üst yetkili (sistem yöneticisi / admin) görüntüleyebilir
   const st = (dof.status || "").toLowerCase().trim();
@@ -152,7 +164,7 @@ export function isUserAuthorizedForDof(user: PanelUser | null, dof: DofForm): bo
   const normalizeText = (text?: string) => 
     (text || "").trim().toLocaleLowerCase("tr-TR");
 
-  const userDept = normalizeText(user.department);
+  const userDept = normalizeText(effectiveDept);
   const dofDept = normalizeText(dof.department);
 
   // Kullanıcının atanmış bir departmanı varsa (ve "tüm birimler" değilse):
@@ -164,20 +176,20 @@ export function isUserAuthorizedForDof(user: PanelUser | null, dof: DofForm): bo
   }
 
   // Doğrudan kullanıcıya atanmış DÖF (ID veya e-posta eşleşmesi)
-  if (dof.assignedUserId && user.id && dof.assignedUserId === user.id) {
+  if (dof.assignedUserId && user?.id && dof.assignedUserId === user.id) {
     return true;
   }
-  if (dof.assignedUserEmail && userEmail && normalizeText(dof.assignedUserEmail) === userEmail) {
+  if (dof.assignedUserEmail && effectiveEmail && normalizeText(dof.assignedUserEmail) === effectiveEmail) {
     return true;
   }
 
   // Kullanıcının bizzat raporladığı DÖF
-  if (dof.reporterContact && userEmail && normalizeText(dof.reporterContact) === userEmail) {
+  if (dof.reporterContact && effectiveEmail && normalizeText(dof.reporterContact) === effectiveEmail) {
     return true;
   }
 
   // Açık global görüntüleme yetkisi sadece departmanı olmayan veya "tüm birimler" olan kullanıcılar için geçerlidir
-  if (user.canSeeAllDofs && (!userDept || userDept === "tüm birimler")) {
+  if (effectiveCanSeeAll && (!userDept || userDept === "tüm birimler")) {
     return true;
   }
 
@@ -384,6 +396,40 @@ export default function DofAdmin() {
     return null;
   });
   const [referralFilter, setReferralFilter] = useState("all");
+
+  const isSystemAdmin = useMemo(() => {
+    // 1. If an active panel user is logged in
+    if (activePanelUser) {
+      const email = (activePanelUser.email || "").toLowerCase().trim();
+      const role = (activePanelUser.role || "").toLowerCase().trim();
+      const dept = (activePanelUser.department || "").trim();
+
+      // sahin@gmail.com or non-admin or department user is NEVER system admin
+      if (email === "sahin@gmail.com") return false;
+      if (role !== "admin") return false;
+      if (dept && dept !== "Tüm Birimler" && dept.toLowerCase() !== "tüm birimler") return false;
+      return true;
+    }
+
+    // 2. Check stored panel user session in localStorage
+    const storedEmail = (localStorage.getItem("dof_admin_authed_email") || "").toLowerCase().trim();
+    const storedRole = (localStorage.getItem("dof_admin_user_role") || "").toLowerCase().trim();
+    const storedDept = (localStorage.getItem("dof_admin_user_dept") || "").trim();
+
+    if (storedEmail) {
+      if (storedEmail === "sahin@gmail.com") return false;
+      if (storedRole !== "admin") return false;
+      if (storedDept && storedDept !== "Tüm Birimler" && storedDept.toLowerCase() !== "tüm birimler") return false;
+      return true;
+    }
+
+    // 3. Fallback: only if user logged in purely via Google (not passcode) and no panel user session exists
+    if (!isPasscodeAuthed && user?.email?.toLowerCase().trim() === "gokhan.eroglu@gmail.com") {
+      return true;
+    }
+
+    return false;
+  }, [activePanelUser, isPasscodeAuthed, user]);
 
   // Layout customization states
   const [layoutOrder, setLayoutOrder] = useState<string[]>(() => {
@@ -792,7 +838,15 @@ export default function DofAdmin() {
         } as DofForm);
       });
 
-      setDofs(list);
+      const userAuthCtx = activePanelUser ? {
+        email: activePanelUser.email,
+        role: activePanelUser.role,
+        department: activePanelUser.department,
+        canSeeAllDofs: activePanelUser.canSeeAllDofs,
+      } : getCurrentUserAuthContext();
+
+      const authorizedList = isSystemAdmin ? list : filterAuthorizedDofs(list, userAuthCtx);
+      setDofs(authorizedList);
       setIsLoading(false);
 
       if (!isInitial) {
@@ -811,7 +865,7 @@ export default function DofAdmin() {
     });
 
     return () => unsubscribe();
-  }, [isAuthorized]);
+  }, [isAuthorized, activePanelUser, isSystemAdmin]);
 
   // Real-time listener for password requests
   useEffect(() => {
@@ -853,11 +907,23 @@ export default function DofAdmin() {
   }, [isAuthorized]);
 
   // Fallback / manual fetch function to keep compatibility with manual refresh buttons
-  const fetchAllDofs = async () => {
+  // Fallback / manual fetch function to keep compatibility with manual refresh buttons
+  const fetchAllDofs = async (overrideUser?: PanelUser | null) => {
     setIsLoading(true);
     try {
-      const data = await listDofs();
-      setDofs(data);
+      const targetUser = overrideUser !== undefined ? overrideUser : activePanelUser;
+      const userAuthCtx = targetUser ? {
+        email: targetUser.email,
+        role: targetUser.role,
+        department: targetUser.department,
+        canSeeAllDofs: targetUser.canSeeAllDofs,
+      } : getCurrentUserAuthContext();
+      const data = await listDofs(userAuthCtx);
+      const isSuper = targetUser 
+        ? (targetUser.role === "admin" && (!targetUser.department || targetUser.department === "Tüm Birimler") && targetUser.email?.toLowerCase().trim() !== "sahin@gmail.com")
+        : isSystemAdmin;
+      const authorizedList = isSuper ? data : filterAuthorizedDofs(data, userAuthCtx);
+      setDofs(authorizedList);
     } catch (err) {
       console.error("Failed to load DOFs:", err);
     } finally {
@@ -899,7 +965,6 @@ export default function DofAdmin() {
 
       if (isPasscodeAuthed) {
         setIsAuthorized(true);
-        fetchAllDofs();
         const usersList = await fetchAllUsers();
         fetchLogs();
 
@@ -907,8 +972,10 @@ export default function DofAdmin() {
         const emailToMatch = (loginEmail || localStorage.getItem("dof_admin_authed_email") || "").toLowerCase().trim();
         const passcodeToMatch = passcode || localStorage.getItem("dof_admin_passcode") || "";
 
+        let resolvedUser: PanelUser | null = null;
+
         if (emailToMatch === "gokhan.eroglu@gmail.com" || (emailToMatch === "admin" && passcodeToMatch === "admin") || (emailToMatch === "" && passcodeToMatch === "admin")) {
-          const adminUser: PanelUser = {
+          resolvedUser = {
             name: "Süper Yönetici (Admin)",
             email: "gokhan.eroglu@gmail.com",
             role: "admin",
@@ -916,7 +983,7 @@ export default function DofAdmin() {
             createdAt: null,
             updatedAt: null
           };
-          setActivePanelUser(adminUser);
+          setActivePanelUser(resolvedUser);
           localStorage.setItem("dof_admin_user_role", "admin");
           localStorage.setItem("dof_admin_user_dept", "Tüm Birimler");
           localStorage.setItem("dof_admin_authed_email", "gokhan.eroglu@gmail.com");
@@ -925,6 +992,7 @@ export default function DofAdmin() {
             u => (emailToMatch ? u.email.toLowerCase().trim() === emailToMatch : false) && (passcodeToMatch ? u.password === passcodeToMatch : true)
           );
           if (matched) {
+            resolvedUser = matched;
             setActivePanelUser(matched);
             localStorage.setItem("dof_admin_user_role", matched.role || "editor");
             localStorage.setItem("dof_admin_user_dept", matched.department || "");
@@ -933,12 +1001,13 @@ export default function DofAdmin() {
             // fallback search by password only if email is empty
             const matchedByPasscodeOnly = usersList.find(u => u.password === passcodeToMatch);
             if (matchedByPasscodeOnly) {
+              resolvedUser = matchedByPasscodeOnly;
               setActivePanelUser(matchedByPasscodeOnly);
               localStorage.setItem("dof_admin_user_role", matchedByPasscodeOnly.role || "editor");
               localStorage.setItem("dof_admin_user_dept", matchedByPasscodeOnly.department || "");
               localStorage.setItem("dof_admin_authed_email", matchedByPasscodeOnly.email);
             } else if (passcodeToMatch === "admin") {
-              const adminUser: PanelUser = {
+              resolvedUser = {
                 name: "Süper Yönetici (Admin)",
                 email: "gokhan.eroglu@gmail.com",
                 role: "admin",
@@ -946,17 +1015,24 @@ export default function DofAdmin() {
                 createdAt: null,
                 updatedAt: null
               };
-              setActivePanelUser(adminUser);
+              setActivePanelUser(resolvedUser);
               localStorage.setItem("dof_admin_user_role", "admin");
               localStorage.setItem("dof_admin_user_dept", "Tüm Birimler");
               localStorage.setItem("dof_admin_authed_email", "gokhan.eroglu@gmail.com");
             }
           }
         }
+        await fetchAllDofs(resolvedUser);
         return;
       }
 
       if (user) {
+        // If a passcode session is already active or stored email belongs to department user, do not overwrite with Google Auth
+        const storedAuthedEmail = (localStorage.getItem("dof_admin_authed_email") || "").toLowerCase().trim();
+        if (storedAuthedEmail && storedAuthedEmail !== "gokhan.eroglu@gmail.com") {
+          return;
+        }
+
         const loggedInEmail = user.email?.toLowerCase().trim();
         const isSuper = loggedInEmail === "gokhan.eroglu@gmail.com";
         
@@ -972,16 +1048,17 @@ export default function DofAdmin() {
 
         if (isSuper || matchedUser || isEmpty) {
           setIsAuthorized(true);
-          fetchAllDofs();
           fetchLogs();
 
+          let resolvedGoogleUser: PanelUser | null = null;
           if (matchedUser) {
+            resolvedGoogleUser = matchedUser;
             setActivePanelUser(matchedUser);
             localStorage.setItem("dof_admin_user_role", matchedUser.role || "editor");
             localStorage.setItem("dof_admin_user_dept", matchedUser.department || "");
             localStorage.setItem("dof_admin_authed_email", matchedUser.email);
           } else if (isSuper) {
-            const superUser: PanelUser = {
+            resolvedGoogleUser = {
               name: user.displayName || "Gökhan Eroğlu",
               email: user.email!,
               role: "admin",
@@ -989,12 +1066,12 @@ export default function DofAdmin() {
               createdAt: null,
               updatedAt: null
             };
-            setActivePanelUser(superUser);
+            setActivePanelUser(resolvedGoogleUser);
             localStorage.setItem("dof_admin_user_role", "admin");
             localStorage.setItem("dof_admin_user_dept", "Tüm Birimler");
             localStorage.setItem("dof_admin_authed_email", user.email!);
           } else if (isEmpty) {
-            const firstUser: PanelUser = {
+            resolvedGoogleUser = {
               name: user.displayName || "İlk Yönetici",
               email: user.email!,
               role: "admin",
@@ -1002,11 +1079,12 @@ export default function DofAdmin() {
               createdAt: null,
               updatedAt: null
             };
-            setActivePanelUser(firstUser);
+            setActivePanelUser(resolvedGoogleUser);
             localStorage.setItem("dof_admin_user_role", "admin");
             localStorage.setItem("dof_admin_user_dept", "Tüm Birimler");
             localStorage.setItem("dof_admin_authed_email", user.email!);
           }
+          await fetchAllDofs(resolvedGoogleUser);
         } else {
           setIsAuthorized(false);
           setActivePanelUser(null);
@@ -1429,18 +1507,13 @@ export default function DofAdmin() {
     window.location.reload();
   };
 
-  const isSystemAdmin = 
-    (activePanelUser?.role === "admin" && (activePanelUser?.email?.toLowerCase().trim() === "gokhan.eroglu@gmail.com" || !activePanelUser?.department || activePanelUser?.department === "Tüm Birimler")) ||
-    (user?.email?.toLowerCase().trim() === "gokhan.eroglu@gmail.com") ||
-    (auth.currentUser?.email?.toLowerCase().trim() === "gokhan.eroglu@gmail.com") ||
-    (localStorage.getItem("dof_admin_user_role") === "admin" &&
-     localStorage.getItem("dof_admin_authed_email")?.toLowerCase().trim() !== "sahin@gmail.com" &&
-     (!localStorage.getItem("dof_admin_user_dept") || localStorage.getItem("dof_admin_user_dept") === "Tüm Birimler"));
-
   // Birim kullanıcısı (örn: sahin@gmail.com) KYS kontrol paneli olarak dashboard'da ve listelerde
   // sadece kendi birimine gelen bildirimleri ve DÖF'leri görür.
   // Yetkisi olmayan hiç kimse diğer birimlerin bilgilerini göremez.
-  const visibleDofs = dofs.filter((d) => isUserAuthorizedForDof(activePanelUser, d));
+  const visibleDofs = useMemo(() => {
+    if (isSystemAdmin) return dofs;
+    return dofs.filter((d) => isUserAuthorizedForDof(activePanelUser, d));
+  }, [dofs, activePanelUser, isSystemAdmin]);
 
   // Filter unique departments for filter dropdown
   const uniqueDepartments = isSystemAdmin
@@ -2121,7 +2194,7 @@ export default function DofAdmin() {
     if (!targetFolderId) return;
     const targetFolder = folders.find(f => f.id === targetFolderId);
     if (!targetFolder) return;
-    const closedDofs = dofs.filter(d => (d.status === "cozuldu" || d.status === "reddedildi") && d.folderId !== targetFolderId);
+    const closedDofs = visibleDofs.filter(d => (d.status === "cozuldu" || (isSystemAdmin && d.status === "reddedildi")) && d.folderId !== targetFolderId);
     if (closedDofs.length === 0) {
       alert("Bu klasörde olmayan kapatılmış/çözülmüş DÖF kaydı bulunamadı.");
       return;
@@ -5485,7 +5558,7 @@ export default function DofAdmin() {
               <div className="space-y-6">
                 <DofFolderManager
                   folders={folders}
-                  dofs={dofs}
+                  dofs={visibleDofs}
                   isSystemAdmin={isSystemAdmin}
                   onFilterByFolder={(targetFolderId) => {
                     setFolderFilter(targetFolderId);
@@ -6743,7 +6816,7 @@ export default function DofAdmin() {
             {adminSubTab === "database" && (
               <div className="space-y-6 animate-fade-in" id="admin-database-tables-section">
                 <DofDatabaseSettings
-                  dofsCount={dofs.length}
+                  dofsCount={visibleDofs.length}
                   departmentsCount={departments.length}
                   panelUsersCount={panelUsers.length}
                   foldersCount={folders.length}
@@ -6868,9 +6941,9 @@ export default function DofAdmin() {
                           className="w-full bg-slate-50 border border-slate-200 rounded-lg p-1.5 text-xs outline-none focus:border-indigo-500 font-medium font-semibold"
                         >
                           <option value="all">Tüm Klasörler</option>
-                          <option value="unassigned">Klasörsüz DÖF'ler</option>
+                          <option value="unassigned">Klasörsüz DÖF'ler ({visibleDofs.filter(d => !d.folderId).length})</option>
                           {folders.map((f) => {
-                            const count = dofs.filter(d => d.folderId === f.id).length;
+                            const count = visibleDofs.filter(d => d.folderId === f.id).length;
                             return (
                               <option key={f.id} value={f.id}>
                                 📁 {f.name} ({count})
@@ -7145,12 +7218,12 @@ export default function DofAdmin() {
                     >
                       <span>Klasörsüz</span>
                       <span className="text-[10px] font-mono opacity-80">
-                        ({dofs.filter(d => !d.folderId).length})
+                        ({visibleDofs.filter(d => !d.folderId).length})
                       </span>
                     </button>
 
                     {folders.map(f => {
-                      const count = dofs.filter(d => d.folderId === f.id).length;
+                      const count = visibleDofs.filter(d => d.folderId === f.id).length;
                       const isSelected = folderFilter === f.id;
                       return (
                         <button
@@ -7684,13 +7757,20 @@ export default function DofAdmin() {
                       </div>
                     </div>
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
+                    <a
+                      href={`?view=edit&refNo=${encodeURIComponent(selectedDof.refNo)}`}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white font-bold rounded-xl text-xs transition cursor-pointer shadow-xs"
+                      title="Mobil Düzenleme Sayfasını Aç"
+                    >
+                      <Smartphone className="h-4 w-4" /> Mobilde Düzenle
+                    </a>
                     <button
                       onClick={() => setSingleQrModalDof(selectedDof)}
                       className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-amber-50 hover:bg-amber-100 active:bg-amber-200 text-amber-800 font-bold rounded-xl text-xs transition cursor-pointer border border-amber-200/70"
                       title="Mobil QR Kodunu Görüntüle ve Paylaş"
                     >
-                      <QrCode className="h-4 w-4 text-amber-600" /> Mobil QR & Düzenle
+                      <QrCode className="h-4 w-4 text-amber-600" /> Mobil QR
                     </button>
                     <button
                       onClick={() => handleDownloadPdf(selectedDof)}

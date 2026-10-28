@@ -65,6 +65,14 @@ export const DofMobileEditor: React.FC<DofMobileEditorProps> = ({
   const [isSaving, setIsSaving] = useState(false);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
 
+  // Auto-Save & Timestamp States
+  const [autoSaveStatus, setAutoSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [lastSavedTime, setLastSavedTime] = useState<string>("");
+  const isInitializedRef = useRef(false);
+  const isSavingRef = useRef(false);
+  const lastSavedSnapshotRef = useRef<string>("");
+  const autoSaveTimerRef = useRef<NodeJS.Timeout | null>(null);
+
   // Editable Form Fields
   const [type, setType] = useState<DofType>("düzeltici");
   const [status, setStatus] = useState<DofStatus>("yeni");
@@ -135,6 +143,7 @@ export const DofMobileEditor: React.FC<DofMobileEditorProps> = ({
     let unsubscribe: (() => void) | undefined;
     setLoading(true);
     setNotFound(false);
+    isInitializedRef.current = false;
 
     const loadDofData = async () => {
       try {
@@ -170,7 +179,10 @@ export const DofMobileEditor: React.FC<DofMobileEditorProps> = ({
           if (docSnap.exists()) {
             const data = { id: docSnap.id, ...docSnap.data() } as DofForm;
             setDof(data);
-            populateForm(data);
+            // Only overwrite draft form inputs on initial document load
+            if (!isInitializedRef.current) {
+              populateForm(data);
+            }
             setNotFound(false);
           } else {
             setNotFound(true);
@@ -198,24 +210,54 @@ export const DofMobileEditor: React.FC<DofMobileEditorProps> = ({
 
   // Populate state when DOF is loaded
   const populateForm = (data: DofForm) => {
-    setType(data.type || "düzeltici");
-    setStatus(data.status || "yeni");
-    setRiskLevel(data.riskLevel || "Orta");
-    setTitle(data.title || "");
-    setDescription(data.description || "");
-    setProposedAction(data.proposedAction || "");
-    setAdminFeedback(data.adminFeedback || "");
-    setImageUrl(data.imageUrl || "");
-    setTargetCompletionDate(data.targetCompletionDate || "");
-    setReferralStatus(data.referralStatus || "beklemede");
-    setReferralNote(data.referralNote || "");
-
+    const newType = data.type || "düzeltici";
+    const newStatus = data.status || "yeni";
+    const newRisk = data.riskLevel || "Orta";
+    const newTitle = data.title || "";
+    const newDesc = data.description || "";
+    const newProposed = data.proposedAction || "";
+    const newFeedback = data.adminFeedback || "";
+    const newImg = data.imageUrl || "";
+    const newTarget = data.targetCompletionDate || "";
+    const newRefStatus = data.referralStatus || "beklemede";
+    const newRefNote = data.referralNote || "";
     const deptVal = data.department || "";
+
+    setType(newType);
+    setStatus(newStatus);
+    setRiskLevel(newRisk);
+    setTitle(newTitle);
+    setDescription(newDesc);
+    setProposedAction(newProposed);
+    setAdminFeedback(newFeedback);
+    setImageUrl(newImg);
+    setTargetCompletionDate(newTarget);
+    setReferralStatus(newRefStatus);
+    setReferralNote(newRefNote);
+
     setDepartment(deptVal);
     if (deptVal && !departmentsList.includes(deptVal)) {
       setIsCustomDept(true);
       setCustomDeptInput(deptVal);
     }
+
+    // Baseline snapshot to prevent false auto-save right after loading
+    lastSavedSnapshotRef.current = JSON.stringify({
+      type: newType,
+      status: newStatus,
+      riskLevel: newRisk,
+      title: newTitle.trim(),
+      department: deptVal,
+      description: newDesc.trim(),
+      proposedAction: newProposed.trim(),
+      adminFeedback: newFeedback.trim(),
+      imageUrl: newImg || "",
+      targetCompletionDate: newTarget || "",
+      referralStatus: newRefStatus,
+      referralNote: newRefNote.trim(),
+    });
+
+    isInitializedRef.current = true;
     setHasUnsavedChanges(false);
   };
 
@@ -264,14 +306,38 @@ export const DofMobileEditor: React.FC<DofMobileEditorProps> = ({
     if (e.target) e.target.value = "";
   };
 
-  // Save changes to Firestore
-  const handleSaveChanges = async () => {
+  // Core save function to Firestore (supports both manual button click and automatic save)
+  const saveToFirestore = async (isManual = false) => {
     if (!dof || !dof.id) return;
+    if (isSavingRef.current && !isManual) return;
 
+    const finalDept = isCustomDept ? customDeptInput.trim() || department : department;
+    const currentSnapshot = JSON.stringify({
+      type,
+      status,
+      riskLevel,
+      title: title.trim(),
+      department: finalDept,
+      description: description.trim(),
+      proposedAction: proposedAction.trim(),
+      adminFeedback: adminFeedback.trim(),
+      imageUrl: imageUrl || "",
+      targetCompletionDate: targetCompletionDate || "",
+      referralStatus,
+      referralNote: referralNote.trim(),
+    });
+
+    // If nothing changed from the last saved state and this is auto-save, skip
+    if (!isManual && currentSnapshot === lastSavedSnapshotRef.current) {
+      setHasUnsavedChanges(false);
+      return;
+    }
+
+    isSavingRef.current = true;
     setIsSaving(true);
-    try {
-      const finalDept = isCustomDept ? customDeptInput.trim() || department : department;
+    setAutoSaveStatus("saving");
 
+    try {
       const updates: Partial<DofForm> = {
         type,
         status,
@@ -285,20 +351,99 @@ export const DofMobileEditor: React.FC<DofMobileEditorProps> = ({
         targetCompletionDate: targetCompletionDate || undefined,
         referralStatus,
         referralNote: referralNote.trim(),
+        updatedAt: new Date().toISOString(),
       };
 
       await updateDof(dof.id, updates);
 
-      setSaveSuccess(true);
+      lastSavedSnapshotRef.current = currentSnapshot;
       setHasUnsavedChanges(false);
+      setAutoSaveStatus("saved");
+      const timeStr = new Date().toLocaleTimeString("tr-TR", {
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+      });
+      setLastSavedTime(timeStr);
+      setSaveSuccess(true);
       setTimeout(() => setSaveSuccess(false), 3000);
     } catch (err) {
       console.error("Failed to update DOF:", err);
-      alert("Form güncellenirken bir hata oluştu. Lütfen bağlantınızı kontrol edip tekrar deneyin.");
+      setAutoSaveStatus("error");
+      if (isManual) {
+        alert("Form güncellenirken bir hata oluştu. Lütfen bağlantınızı kontrol edip tekrar deneyin.");
+      }
     } finally {
+      isSavingRef.current = false;
       setIsSaving(false);
     }
   };
+
+  // Manual save handler
+  const handleSaveChanges = () => {
+    if (autoSaveTimerRef.current) {
+      clearTimeout(autoSaveTimerRef.current);
+    }
+    saveToFirestore(true);
+  };
+
+  // Auto-Save Effect: Watches all fields and automatically saves on any change (debounced 800ms)
+  useEffect(() => {
+    if (!isInitializedRef.current || !dof || !dof.id) return;
+
+    const finalDept = isCustomDept ? customDeptInput.trim() || department : department;
+    const currentSnapshot = JSON.stringify({
+      type,
+      status,
+      riskLevel,
+      title: title.trim(),
+      department: finalDept,
+      description: description.trim(),
+      proposedAction: proposedAction.trim(),
+      adminFeedback: adminFeedback.trim(),
+      imageUrl: imageUrl || "",
+      targetCompletionDate: targetCompletionDate || "",
+      referralStatus,
+      referralNote: referralNote.trim(),
+    });
+
+    if (currentSnapshot === lastSavedSnapshotRef.current) {
+      setHasUnsavedChanges(false);
+      return;
+    }
+
+    setHasUnsavedChanges(true);
+
+    if (autoSaveTimerRef.current) {
+      clearTimeout(autoSaveTimerRef.current);
+    }
+
+    // Debounce: 800ms
+    autoSaveTimerRef.current = setTimeout(() => {
+      saveToFirestore(false);
+    }, 800);
+
+    return () => {
+      if (autoSaveTimerRef.current) {
+        clearTimeout(autoSaveTimerRef.current);
+      }
+    };
+  }, [
+    type,
+    status,
+    riskLevel,
+    title,
+    department,
+    customDeptInput,
+    isCustomDept,
+    description,
+    proposedAction,
+    adminFeedback,
+    imageUrl,
+    targetCompletionDate,
+    referralStatus,
+    referralNote,
+  ]);
 
   // Add Comment/Note
   const handleAddComment = async (e: React.FormEvent) => {
@@ -385,7 +530,7 @@ export const DofMobileEditor: React.FC<DofMobileEditorProps> = ({
   ];
 
   return (
-    <div className="max-w-3xl mx-auto space-y-6 pb-28" id="dof-mobile-editor-page">
+    <div className="max-w-3xl mx-auto space-y-6 pb-44 sm:pb-36" id="dof-mobile-editor-page">
       
       {/* Top Header Card */}
       <div className="bg-white border border-slate-150 rounded-2xl p-4 shadow-sm flex items-center justify-between gap-3">
@@ -393,7 +538,7 @@ export const DofMobileEditor: React.FC<DofMobileEditorProps> = ({
           {onBack && (
             <button
               onClick={onBack}
-              className="p-2 rounded-xl text-slate-500 hover:text-slate-800 hover:bg-slate-100 transition cursor-pointer"
+              className="p-2 rounded-xl text-slate-500 hover:text-slate-800 hover:bg-slate-100 transition cursor-pointer shrink-0"
               title="Geri Dön"
             >
               <ArrowLeft className="h-5 w-5" />
@@ -425,6 +570,38 @@ export const DofMobileEditor: React.FC<DofMobileEditorProps> = ({
 
         {/* Top Quick Actions */}
         <div className="flex items-center gap-1.5 shrink-0">
+          {dof && (
+            <button
+              type="button"
+              onClick={handleSaveChanges}
+              disabled={isSaving}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-xs ${
+                saveSuccess || autoSaveStatus === "saved"
+                  ? "bg-emerald-600 text-white shadow-emerald-200"
+                  : hasUnsavedChanges
+                  ? "bg-indigo-600 hover:bg-indigo-700 text-white ring-2 ring-indigo-400 animate-pulse"
+                  : "bg-indigo-600 hover:bg-indigo-700 text-white"
+              }`}
+              title="Değişiklikleri Kaydet (Otomatik kayıt aktiftir)"
+              id="mobile-header-save-btn"
+            >
+              {isSaving ? (
+                <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+              ) : saveSuccess || autoSaveStatus === "saved" ? (
+                <CheckCircle2 className="h-3.5 w-3.5" />
+              ) : (
+                <Save className="h-3.5 w-3.5" />
+              )}
+              <span>
+                {isSaving
+                  ? "Kaydediliyor..."
+                  : saveSuccess || autoSaveStatus === "saved"
+                  ? "Kaydedildi"
+                  : "Kaydet"}
+              </span>
+            </button>
+          )}
+
           <button
             onClick={() => setShowScannerModal(true)}
             className="p-2 rounded-xl bg-slate-100 hover:bg-indigo-50 text-slate-700 hover:text-indigo-600 transition cursor-pointer flex items-center gap-1"
@@ -916,6 +1093,40 @@ export const DofMobileEditor: React.FC<DofMobileEditorProps> = ({
                 </button>
               </div>
             )}
+
+            {/* Immediate prominent save button in Section 5 */}
+            <div className="pt-2 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={handleSaveChanges}
+                disabled={isSaving}
+                className={`w-full py-3 px-4 rounded-xl text-xs font-bold transition flex items-center justify-center gap-2 cursor-pointer shadow-md ${
+                  saveSuccess
+                    ? "bg-emerald-600 text-white shadow-emerald-200"
+                    : imageUrl
+                    ? "bg-indigo-600 hover:bg-indigo-700 text-white shadow-indigo-200"
+                    : "bg-slate-900 hover:bg-slate-950 text-white"
+                }`}
+                id="mobile-section5-save-btn"
+              >
+                {isSaving ? (
+                  <>
+                    <RefreshCw className="h-4 w-4 animate-spin" />
+                    <span>Değişiklikler Kaydediliyor...</span>
+                  </>
+                ) : saveSuccess ? (
+                  <>
+                    <CheckCircle2 className="h-4 w-4" />
+                    <span>Fotoğraf ve Bilgiler Başarıyla Kaydedildi!</span>
+                  </>
+                ) : (
+                  <>
+                    <Save className="h-4 w-4" />
+                    <span>Değişiklikleri Kaydet</span>
+                  </>
+                )}
+              </button>
+            </div>
           </div>
 
           {/* Section 6: Bildiren Kişi Kartı */}
@@ -993,17 +1204,164 @@ export const DofMobileEditor: React.FC<DofMobileEditorProps> = ({
             </form>
           </div>
 
+          {/* Section 8: DÖF Formu En Altı - Değişiklikleri Kaydet & Otomatik Kayıt Paneli */}
+          <div 
+            className="bg-white border-2 border-indigo-500/20 rounded-3xl p-5 sm:p-6 shadow-xl space-y-4 animate-fade-in"
+            id="dof-bottom-primary-save-container"
+          >
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-150">
+              <div className="flex items-center gap-3">
+                <div className={`p-3 rounded-2xl ${
+                  saveSuccess || autoSaveStatus === "saved" ? "bg-emerald-100 text-emerald-700" : "bg-indigo-50 text-indigo-600"
+                }`}>
+                  <Save className="h-6 w-6" />
+                </div>
+                <div>
+                  <h3 className="text-sm sm:text-base font-extrabold text-slate-900">
+                    DÖF Form Değişiklikleri
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Form üzerinde yaptığınız her değişiklik sistem tarafından otomatik olarak kaydedilir.
+                  </p>
+                </div>
+              </div>
+
+              {/* Real-time Auto-Save Status Badge */}
+              <div className="flex items-center gap-2 self-start sm:self-auto">
+                {isSaving ? (
+                  <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold bg-amber-50 text-amber-700 border border-amber-200 animate-pulse shadow-xs">
+                    <RefreshCw className="h-3.5 w-3.5 animate-spin text-amber-600" />
+                    Otomatik Kaydediliyor...
+                  </span>
+                ) : autoSaveStatus === "saved" || saveSuccess ? (
+                  <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 shadow-xs">
+                    <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
+                    {lastSavedTime ? `Otomatik Kaydedildi (${lastSavedTime})` : "Tüm Değişiklikler Kaydedildi"}
+                  </span>
+                ) : hasUnsavedChanges ? (
+                  <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold bg-amber-50 text-amber-700 border border-amber-200 shadow-xs">
+                    <span className="w-2.5 h-2.5 rounded-full bg-amber-500 animate-pulse" />
+                    Kaydedilmemiş Değişiklikler (Kaydediliyor...)
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold bg-slate-100 text-slate-600 border border-slate-200">
+                    <Check className="h-3.5 w-3.5 text-slate-400" />
+                    Sistem Otomatik Kayıt Devrede
+                  </span>
+                )}
+              </div>
+            </div>
+
+            {/* Prominent Large Save Changes Button at the Very Bottom of the DÖF */}
+            <button
+              type="button"
+              onClick={handleSaveChanges}
+              disabled={isSaving}
+              className={`w-full py-4 px-6 rounded-2xl text-sm sm:text-base font-extrabold transition-all duration-200 flex items-center justify-center gap-3 cursor-pointer shadow-lg active:scale-[0.98] ${
+                saveSuccess || autoSaveStatus === "saved"
+                  ? "bg-emerald-600 text-white shadow-emerald-200 ring-2 ring-emerald-400"
+                  : hasUnsavedChanges
+                  ? "bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white shadow-indigo-300 ring-2 ring-indigo-400 animate-pulse"
+                  : "bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white shadow-indigo-200"
+              }`}
+              id="dof-bottom-primary-save-btn"
+            >
+              {isSaving ? (
+                <>
+                  <RefreshCw className="h-5 w-5 animate-spin" />
+                  <span>Değişiklikler Kaydediliyor...</span>
+                </>
+              ) : saveSuccess ? (
+                <>
+                  <CheckCircle2 className="h-5 w-5 animate-in zoom-in-75 duration-200" />
+                  <span>Değişiklikler Başarıyla Kaydedildi!</span>
+                </>
+              ) : (
+                <>
+                  <Save className="h-5 w-5" />
+                  <span>Değişiklikleri Kaydet</span>
+                </>
+              )}
+            </button>
+
+            {/* Quick helper links below the button */}
+            <div className="flex flex-wrap items-center justify-between gap-2 pt-2 text-xs text-slate-500">
+              <span className="flex items-center gap-1.5 text-[11px] text-slate-400">
+                <span className="w-2 h-2 rounded-full bg-emerald-500 inline-block" />
+                Herhangi bir alanda değişiklik yaptığınızda sistem otomatik kaydeder.
+              </span>
+              <div className="flex items-center gap-3">
+                {onGoToTrack && (
+                  <button
+                    type="button"
+                    onClick={() => onGoToTrack(dof.refNo)}
+                    className="font-bold text-indigo-600 hover:text-indigo-800 hover:underline cursor-pointer flex items-center gap-1"
+                  >
+                    <ExternalLink className="h-3 w-3" />
+                    Takip Sayfası
+                  </button>
+                )}
+                {onBack && (
+                  <button
+                    type="button"
+                    onClick={onBack}
+                    className="font-bold text-slate-600 hover:text-slate-900 hover:underline cursor-pointer flex items-center gap-1"
+                  >
+                    <ArrowLeft className="h-3 w-3" />
+                    Listeye Dön
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+
         </div>
       )}
 
       {/* Floating Sticky Mobile Bottom Action Bar */}
       {dof && (
         <div 
-          className="fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-slate-200/80 px-4 py-3 shadow-lg print:hidden"
+          className="fixed bottom-0 left-0 right-0 z-50 bg-white/95 backdrop-blur-md border-t border-slate-200/90 px-4 py-3 shadow-2xl print:hidden pb-[calc(env(safe-area-inset-bottom)+0.75rem)]"
           id="mobile-editor-sticky-bar"
         >
           <div className="max-w-3xl mx-auto flex items-center justify-between gap-3">
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 min-w-0">
+              {onBack && (
+                <button
+                  type="button"
+                  onClick={onBack}
+                  className="p-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl transition cursor-pointer shrink-0"
+                  title="Geri Dön"
+                >
+                  <ArrowLeft className="h-4 w-4" />
+                </button>
+              )}
+              {isSaving ? (
+                <span className="inline-flex items-center gap-1.5 text-[11px] font-bold text-amber-600 truncate">
+                  <RefreshCw className="h-3.5 w-3.5 animate-spin shrink-0" />
+                  <span className="hidden xs:inline">Kaydediliyor...</span>
+                </span>
+              ) : saveSuccess || autoSaveStatus === "saved" ? (
+                <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-600 truncate">
+                  <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-600" />
+                  <span className="hidden xs:inline">
+                    {lastSavedTime ? `Kaydedildi (${lastSavedTime})` : "Kaydedildi"}
+                  </span>
+                </span>
+              ) : hasUnsavedChanges ? (
+                <span className="inline-flex items-center gap-1 text-[11px] font-bold text-amber-600 truncate">
+                  <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse shrink-0" />
+                  <span className="hidden xs:inline">Kaydedilmemiş</span>
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-1 text-[11px] font-medium text-slate-500 truncate">
+                  <Check className="h-3.5 w-3.5 text-slate-400 shrink-0" />
+                  <span className="hidden xs:inline">Otomatik Kayıt</span>
+                </span>
+              )}
+            </div>
+
+            <div className="flex items-center gap-2 shrink-0">
               {onGoToTrack && (
                 <button
                   type="button"
@@ -1012,25 +1370,18 @@ export const DofMobileEditor: React.FC<DofMobileEditorProps> = ({
                   title="Durum Takip Sayfası"
                 >
                   <ExternalLink className="h-3.5 w-3.5" />
-                  <span className="hidden sm:inline">Takipte Gör</span>
+                  <span className="hidden sm:inline">Takip</span>
                 </button>
               )}
-              {hasUnsavedChanges && (
-                <span className="hidden sm:inline-flex items-center gap-1 text-[11px] font-semibold text-amber-600">
-                  <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
-                  Kaydedilmemiş Değişiklikler
-                </span>
-              )}
-            </div>
-
-            <div className="flex items-center gap-2">
               <button
                 type="button"
                 onClick={handleSaveChanges}
                 disabled={isSaving}
-                className={`px-5 py-2.5 rounded-xl text-xs font-bold transition flex items-center gap-2 cursor-pointer shadow-md ${
-                  saveSuccess
+                className={`px-4 sm:px-6 py-2.5 rounded-xl text-xs sm:text-sm font-extrabold transition flex items-center gap-2 cursor-pointer shadow-md ${
+                  saveSuccess || autoSaveStatus === "saved"
                     ? "bg-emerald-600 text-white shadow-emerald-200"
+                    : hasUnsavedChanges
+                    ? "bg-indigo-600 hover:bg-indigo-700 text-white shadow-indigo-300 ring-2 ring-indigo-400 animate-pulse"
                     : "bg-indigo-600 hover:bg-indigo-700 text-white shadow-indigo-200"
                 }`}
                 id="mobile-save-changes-btn"
@@ -1038,17 +1389,17 @@ export const DofMobileEditor: React.FC<DofMobileEditorProps> = ({
                 {isSaving ? (
                   <>
                     <RefreshCw className="h-4 w-4 animate-spin" />
-                    Kaydediliyor...
+                    <span>Kaydediliyor...</span>
                   </>
                 ) : saveSuccess ? (
                   <>
                     <CheckCircle2 className="h-4 w-4" />
-                    Başarıyla Kaydedildi!
+                    <span>Kaydedildi!</span>
                   </>
                 ) : (
                   <>
                     <Save className="h-4 w-4" />
-                    Değişiklikleri Kaydet
+                    <span>Değişiklikleri Kaydet</span>
                   </>
                 )}
               </button>

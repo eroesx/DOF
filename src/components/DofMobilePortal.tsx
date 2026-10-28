@@ -41,7 +41,7 @@ import {
 import { collection, onSnapshot, getDocs } from "firebase/firestore";
 import { db } from "../firebase";
 import { DofForm, PanelUser } from "../types";
-import { maskKvkkText } from "../lib/settings";
+import { maskKvkkText, getAppVersion } from "../lib/settings";
 
 interface DofMobilePortalProps {
   onNavigate: (tab: "submit" | "track" | "admin" | "qr" | "edit") => void;
@@ -371,6 +371,9 @@ export const DofMobilePortal: React.FC<DofMobilePortalProps> = ({
                 <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-indigo-50 text-indigo-700 rounded-full font-bold text-[11px] border border-indigo-100">
                   <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
                   ISO 9001:2015 Kalite Yönetim Sistemi
+                </span>
+                <span className="px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 font-mono font-bold text-[10px] border border-slate-200">
+                  {getAppVersion()}
                 </span>
                 <span className="text-[11px] font-semibold text-slate-400">
                   Canlı Portal

@@ -50,17 +50,19 @@ export default function App() {
   const [isPasscodeAuthed, setIsPasscodeAuthed] = useState(false);
 
   const computeIsAdmin = (currentUser?: any) => {
-    const role = localStorage.getItem("dof_admin_user_role");
-    const passcode = localStorage.getItem("dof_admin_passcode");
     const email = localStorage.getItem("dof_admin_authed_email")?.toLowerCase().trim();
-    const currEmail = (currentUser || auth.currentUser)?.email?.toLowerCase().trim();
+    const role = localStorage.getItem("dof_admin_user_role");
+    const dept = localStorage.getItem("dof_admin_user_dept");
 
-    return (
-      role === "admin" ||
-      passcode === "admin" ||
-      email === "gokhan.eroglu@gmail.com" ||
-      currEmail === "gokhan.eroglu@gmail.com"
-    );
+    if (email) {
+      if (email === "sahin@gmail.com") return false;
+      if (role === "admin" && (!dept || dept === "Tüm Birimler")) return true;
+      if (email === "gokhan.eroglu@gmail.com") return true;
+      return false;
+    }
+
+    const currEmail = (currentUser || auth.currentUser)?.email?.toLowerCase().trim();
+    return currEmail === "gokhan.eroglu@gmail.com";
   };
 
   const [isAdmin, setIsAdmin] = useState<boolean>(() => computeIsAdmin());
@@ -185,8 +187,8 @@ export default function App() {
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col">
       
-      {/* Top Banner (Hidden during printing) */}
-      <header className="bg-white border-b border-slate-100 shadow-sm sticky top-0 z-50 print:hidden">
+      {/* Top Banner (Hidden on mobile for clean app experience, hidden during printing) */}
+      <header className="hidden md:block bg-white border-b border-slate-100 shadow-sm sticky top-0 z-50 print:hidden">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between h-16">
             
@@ -447,65 +449,67 @@ export default function App() {
 
       </main>
 
-      {/* Ergonomic Mobile Bottom Navigation Bar (Visible only on mobile devices) */}
-      <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-slate-200/90 px-3 py-1.5 flex justify-around items-center shadow-2xl pb-[calc(env(safe-area-inset-bottom)+0.35rem)] print:hidden">
-        <button
-          onClick={() => setActiveTab("portal")}
-          className={`flex flex-col items-center gap-1 py-1 px-2.5 rounded-xl transition cursor-pointer ${
-            activeTab === "portal" ? "text-indigo-600 font-bold" : "text-slate-400 hover:text-slate-600"
-          }`}
-          id="mobile-bottom-portal"
-        >
-          <Home className="h-5 w-5" />
-          <span className="text-[10px]">Giriş</span>
-        </button>
+      {/* Ergonomic Mobile Bottom Navigation Bar (Visible only on mobile devices, hidden during DOF mobile editing) */}
+      {activeTab !== "edit" && (
+        <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-slate-200/90 px-3 py-1.5 flex justify-around items-center shadow-2xl pb-[calc(env(safe-area-inset-bottom)+0.35rem)] print:hidden">
+          <button
+            onClick={() => setActiveTab("portal")}
+            className={`flex flex-col items-center gap-1 py-1 px-2.5 rounded-xl transition cursor-pointer ${
+              activeTab === "portal" ? "text-indigo-600 font-bold" : "text-slate-400 hover:text-slate-600"
+            }`}
+            id="mobile-bottom-portal"
+          >
+            <Home className="h-5 w-5" />
+            <span className="text-[10px]">Giriş</span>
+          </button>
 
-        <button
-          onClick={() => setActiveTab("submit")}
-          className={`flex flex-col items-center gap-1 py-1 px-2.5 rounded-xl transition cursor-pointer ${
-            activeTab === "submit" ? "text-indigo-600 font-bold" : "text-slate-400 hover:text-slate-600"
-          }`}
-          id="mobile-bottom-submit"
-        >
-          <FileEdit className="h-5 w-5" />
-          <span className="text-[10px]">Bildir</span>
-        </button>
+          <button
+            onClick={() => setActiveTab("submit")}
+            className={`flex flex-col items-center gap-1 py-1 px-2.5 rounded-xl transition cursor-pointer ${
+              activeTab === "submit" ? "text-indigo-600 font-bold" : "text-slate-400 hover:text-slate-600"
+            }`}
+            id="mobile-bottom-submit"
+          >
+            <FileEdit className="h-5 w-5" />
+            <span className="text-[10px]">Bildir</span>
+          </button>
 
-        {/* Central Prominent QR Scan Button */}
-        <button
-          onClick={() => setIsScannerModalOpen(true)}
-          className="flex flex-col items-center -mt-5 transition transform active:scale-95 cursor-pointer"
-          title="Kamera ile QR Tara"
-          id="mobile-bottom-qr-btn"
-        >
-          <div className="w-12 h-12 rounded-full bg-gradient-to-tr from-indigo-600 to-indigo-500 text-white flex items-center justify-center shadow-lg shadow-indigo-300 ring-4 ring-white">
-            <Camera className="h-6 w-6" />
-          </div>
-          <span className="text-[10px] font-bold text-indigo-600 mt-0.5">QR Tara</span>
-        </button>
+          {/* Central Prominent QR Scan Button */}
+          <button
+            onClick={() => setIsScannerModalOpen(true)}
+            className="flex flex-col items-center -mt-5 transition transform active:scale-95 cursor-pointer"
+            title="Kamera ile QR Tara"
+            id="mobile-bottom-qr-btn"
+          >
+            <div className="w-12 h-12 rounded-full bg-gradient-to-tr from-indigo-600 to-indigo-500 text-white flex items-center justify-center shadow-lg shadow-indigo-300 ring-4 ring-white">
+              <Camera className="h-6 w-6" />
+            </div>
+            <span className="text-[10px] font-bold text-indigo-600 mt-0.5">QR Tara</span>
+          </button>
 
-        <button
-          onClick={() => setActiveTab("track")}
-          className={`flex flex-col items-center gap-1 py-1 px-2.5 rounded-xl transition cursor-pointer ${
-            activeTab === "track" ? "text-indigo-600 font-bold" : "text-slate-400 hover:text-slate-600"
-          }`}
-          id="mobile-bottom-track"
-        >
-          <Search className="h-5 w-5" />
-          <span className="text-[10px]">Takip</span>
-        </button>
+          <button
+            onClick={() => setActiveTab("track")}
+            className={`flex flex-col items-center gap-1 py-1 px-2.5 rounded-xl transition cursor-pointer ${
+              activeTab === "track" ? "text-indigo-600 font-bold" : "text-slate-400 hover:text-slate-600"
+            }`}
+            id="mobile-bottom-track"
+          >
+            <Search className="h-5 w-5" />
+            <span className="text-[10px]">Takip</span>
+          </button>
 
-        <button
-          onClick={() => setActiveTab("admin")}
-          className={`flex flex-col items-center gap-1 py-1 px-2.5 rounded-xl transition cursor-pointer ${
-            activeTab === "admin" ? "text-indigo-600 font-bold" : "text-slate-400 hover:text-slate-600"
-          }`}
-          id="mobile-bottom-admin"
-        >
-          <Lock className="h-5 w-5" />
-          <span className="text-[10px]">Panel</span>
-        </button>
-      </nav>
+          <button
+            onClick={() => setActiveTab("admin")}
+            className={`flex flex-col items-center gap-1 py-1 px-2.5 rounded-xl transition cursor-pointer ${
+              activeTab === "admin" ? "text-indigo-600 font-bold" : "text-slate-400 hover:text-slate-600"
+            }`}
+            id="mobile-bottom-admin"
+          >
+            <Lock className="h-5 w-5" />
+            <span className="text-[10px]">Panel</span>
+          </button>
+        </nav>
+      )}
 
       {/* Footer (Hidden during printing) */}
       <footer className="bg-white border-t border-slate-100 py-6 mt-12 print:hidden">

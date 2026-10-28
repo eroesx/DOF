@@ -122,19 +122,146 @@ export async function getDofByRefNo(refNo: string): Promise<DofForm | null> {
   }
 }
 
-export async function listDofs(): Promise<DofForm[]> {
+// Centralized Authorization & Access Filter
+export interface UserAuthContext {
+  email?: string | null;
+  role?: string | null;
+  department?: string | null;
+  canSeeAllDofs?: boolean;
+}
+
+export function getCurrentUserAuthContext(): UserAuthContext {
+  const email = (localStorage.getItem("dof_admin_authed_email") || "").toLowerCase().trim();
+  const role = (localStorage.getItem("dof_admin_user_role") || "").toLowerCase().trim();
+  const department = localStorage.getItem("dof_admin_user_dept") || "";
+  
+  if (email) {
+    return {
+      email,
+      role: email === "sahin@gmail.com" ? "editor" : role,
+      department: email === "sahin@gmail.com" ? (department || "Üzülmez TİM") : department,
+      canSeeAllDofs: false
+    };
+  }
+
+  // Only fallback to auth.currentUser if no panel user is stored
+  const googleEmail = (auth.currentUser?.email || "").toLowerCase().trim();
+  return {
+    email: googleEmail,
+    role: googleEmail === "gokhan.eroglu@gmail.com" ? "admin" : role,
+    department: googleEmail === "gokhan.eroglu@gmail.com" ? "Tüm Birimler" : department,
+    canSeeAllDofs: false
+  };
+}
+
+/**
+ * accessFilter: Centralized constraint function enforcing department or user_id constraint on DÖF records.
+ * Non-admin users strictly see only records belonging to their department or assigned to them.
+ * Rejected DOFs are restricted strictly to system admins.
+ */
+export function accessFilter(dof: DofForm, context?: UserAuthContext | null): boolean {
+  const ctx = context || getCurrentUserAuthContext();
+  const email = (ctx.email || "").toLowerCase().trim();
+  const dept = (ctx.department || "").trim();
+  const role = (ctx.role || "").toLowerCase().trim();
+
+  // sahin@gmail.com or users with specific departments are strictly department users, NEVER super admin
+  const isSuper = email !== "sahin@gmail.com" &&
+    ((role === "admin" && (!dept || dept === "Tüm Birimler" || dept.toLowerCase() === "tüm birimler")) ||
+     (email === "gokhan.eroglu@gmail.com" && (!dept || dept === "Tüm Birimler")));
+  
+  // 1. Reddedilen DÖF'leri SADECE en üst yetkili (sistem yöneticisi / admin) görebilir
+  const st = (dof.status || "").toLowerCase().trim();
+  const isRejected = st === "reddedildi" || st === "iptal";
+  if (isRejected && !isSuper) {
+    return false;
+  }
+
+  // 2. Tam yetkili sistem yöneticisi tüm DÖF'leri görebilir
+  if (isSuper) {
+    return true;
+  }
+
+  // Türkçe karakterlere duyarlı normalizasyon
+  const norm = (s?: string) => (s || "").trim().toLocaleLowerCase("tr-TR");
+  const userDept = norm(dept);
+  const dofDept = norm(dof.department);
+
+  // Departman eşleşmesi (kullanıcının birimi ile DÖF birimi)
+  if (userDept && userDept !== "tüm birimler") {
+    if (dofDept === userDept) return true;
+  }
+
+  // Kullanıcıya atanmış DÖF (e-posta veya ID)
+  if (dof.assignedUserEmail && email && norm(dof.assignedUserEmail) === email) {
+    return true;
+  }
+
+  // Kullanıcının bizzat raporladığı DÖF
+  if (dof.reporterContact && email && norm(dof.reporterContact) === email) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * filterAuthorizedDofs: Filters an array of DÖFs by the given or current user authorization context.
+ */
+export function filterAuthorizedDofs(dofs: DofForm[], context?: UserAuthContext | null): DofForm[] {
+  const ctx = context || getCurrentUserAuthContext();
+  return dofs.filter((dof) => accessFilter(dof, ctx));
+}
+
+/**
+ * authorizedQuery: Prepares a Firestore query enforcing department filter if applicable.
+ */
+export function authorizedQuery(context?: UserAuthContext | null) {
+  const ctx = context || getCurrentUserAuthContext();
+  const colRef = collection(db, COLLECTION_NAME);
+  const email = (ctx.email || "").toLowerCase().trim();
+  const dept = (ctx.department || "").trim();
+  const role = (ctx.role || "").toLowerCase().trim();
+  const isSuper = email !== "sahin@gmail.com" &&
+    ((role === "admin" && (!dept || dept === "Tüm Birimler" || dept.toLowerCase() === "tüm birimler")) ||
+     (email === "gokhan.eroglu@gmail.com" && (!dept || dept === "Tüm Birimler")));
+
+  if (!isSuper && dept && dept.toLowerCase() !== "tüm birimler") {
+    return query(colRef, where("department", "==", dept), orderBy("createdAt", "desc"));
+  }
+
+  return query(colRef, orderBy("createdAt", "desc"));
+}
+
+export async function listAuthorizedDofs(context?: UserAuthContext | null): Promise<DofForm[]> {
+  return listDofs(context);
+}
+
+export async function listDofs(context?: UserAuthContext | null): Promise<DofForm[]> {
   const path = COLLECTION_NAME;
+  const ctx = context || getCurrentUserAuthContext();
   try {
-    const q = query(collection(db, COLLECTION_NAME), orderBy("createdAt", "desc"));
+    const q = authorizedQuery(ctx);
     const querySnapshot = await getDocs(q);
     const list: DofForm[] = [];
     querySnapshot.forEach((doc) => {
       list.push({ id: doc.id, ...doc.data() } as DofForm);
     });
-    return list;
+    return filterAuthorizedDofs(list, ctx);
   } catch (error) {
-    handleFirestoreError(error, OperationType.LIST, path);
-    return [];
+    // Composite index fallback
+    try {
+      const qFallback = query(collection(db, COLLECTION_NAME), orderBy("createdAt", "desc"));
+      const querySnapshot = await getDocs(qFallback);
+      const list: DofForm[] = [];
+      querySnapshot.forEach((doc) => {
+        list.push({ id: doc.id, ...doc.data() } as DofForm);
+      });
+      return filterAuthorizedDofs(list, ctx);
+    } catch (fallbackError) {
+      handleFirestoreError(error, OperationType.LIST, path);
+      return [];
+    }
   }
 }
 

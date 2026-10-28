@@ -178,7 +178,7 @@ export const exportDofPdf = async (dof: DofForm): Promise<void> => {
       "Bildirim Tarihi",
       formatPdfDate(dof.createdAt),
       "Termin Suresi",
-      dof.deadlineDate ? cleanPdfText(dof.deadlineDate) : (dof.type === "düzeltici" ? "Standart 3 Gun" : "Standart 7 Gun"),
+      dof.targetCompletionDate ? cleanPdfText(dof.targetCompletionDate) : (dof.type === "düzeltici" ? "Standart 3 Gun" : "Standart 7 Gun"),
       y
     );
     y += 12;

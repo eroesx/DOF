@@ -410,7 +410,7 @@ export const DofOverviewKpiChart: React.FC<DofOverviewKpiChartProps> = ({
                 <BarChart
                   data={volumeData}
                   margin={{ top: 15, right: 20, left: -10, bottom: 25 }}
-                  onClick={(e) => {
+                  onClick={(e: any) => {
                     if (e && e.activePayload && e.activePayload[0] && onFilterClick) {
                       const data = e.activePayload[0].payload;
                       if (data.statusKey) onFilterClick(data.statusKey);
