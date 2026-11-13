@@ -24,10 +24,25 @@ import { DofQrScannerModal, ScanResult } from "./components/DofQrScannerModal";
 import { onAuthStateChanged } from "firebase/auth";
 import { auth, signOut } from "./firebase";
 import { getStoredAccessRoles, getRoleById } from "./lib/roles";
+import { getAppVersion, syncSettingsFromFirestore } from "./lib/settings";
 
 type ViewTab = "portal" | "submit" | "track" | "admin" | "qr" | "edit";
 
 export default function App() {
+  const [appVersion, setAppVersion] = useState<string>(() => getAppVersion());
+
+  useEffect(() => {
+    let cancelled = false;
+    syncSettingsFromFirestore()
+      .then(() => {
+        if (!cancelled) setAppVersion(getAppVersion());
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const [activeTab, setActiveTab] = useState<ViewTab>(() => {
     if (typeof window !== "undefined") {
       const params = new URLSearchParams(window.location.search);
@@ -41,6 +56,10 @@ export default function App() {
     }
     return "admin";
   });
+
+  useEffect(() => {
+    setAppVersion(getAppVersion());
+  }, [activeTab]);
   const [initialTrackRef, setInitialTrackRef] = useState<string | null>(null);
   const [editRefNo, setEditRefNo] = useState<string | null>(null);
   const [editId, setEditId] = useState<string | null>(null);
@@ -546,7 +565,15 @@ export default function App() {
             <Info className="h-4 w-4 text-indigo-500" />
             <span>Kalite Bildirim ve Sürekli İyileştirme Sistemi</span>
           </div>
-          <p>© 2026 DÖF Yönetim ve Sürekli İyileştirme Sistemi. Tüm Hakları Saklıdır.</p>
+          <div className="flex flex-col sm:flex-row items-center justify-center gap-1.5 sm:gap-3">
+            <p>© 2026 DÖF Yönetim ve Sürekli İyileştirme Sistemi. Tüm Hakları Saklıdır.</p>
+            <span
+              className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200"
+              title="Uygulama Sürümü"
+            >
+              Sürüm {appVersion}
+            </span>
+          </div>
         </div>
       </footer>
 
