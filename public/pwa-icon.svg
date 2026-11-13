@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#4f46e5" />
+      <stop offset="50%" stop-color="#4338ca" />
+      <stop offset="100%" stop-color="#312e81" />
+    </linearGradient>
+    <linearGradient id="accentGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#10b981" />
+      <stop offset="100%" stop-color="#059669" />
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="16" stdDeviation="24" flood-color="#000000" flood-opacity="0.35"/>
+    </filter>
+  </defs>
+
+  <!-- Background Squircle with Safe Zone Margins for Maskable Icons -->
+  <rect width="512" height="512" rx="128" fill="url(#bgGrad)" />
+
+  <!-- Inner Shield Badge -->
+  <g filter="url(#shadow)">
+    <!-- Shield Outline / Body -->
+    <path d="M 256 80 L 390 140 C 390 270 290 380 256 410 C 222 380 122 270 122 140 Z" fill="#ffffff" fill-opacity="0.12" stroke="#ffffff" stroke-width="8" stroke-linejoin="round"/>
+    
+    <!-- Central Shield Inner Core -->
+    <path d="M 256 104 L 366 154 C 366 256 284 348 256 376 C 228 348 146 256 146 154 Z" fill="url(#bgGrad)" stroke="#6366f1" stroke-width="4"/>
+    
+    <!-- Dynamic Checkmark & Progress Ribbon -->
+    <path d="M 190 240 L 236 286 L 328 194" fill="none" stroke="url(#accentGrad)" stroke-width="28" stroke-linecap="round" stroke-linejoin="round"/>
+    
+    <!-- Circular Gears / Tech Nodes -->
+    <circle cx="256" cy="140" r="14" fill="#60a5fa" />
+    <circle cx="200" cy="340" r="10" fill="#34d399" />
+    <circle cx="312" cy="340" r="10" fill="#a78bfa" />
+  </g>
+
+  <!-- Small DÖF Text Label -->
+  <text x="256" y="465" font-family="system-ui, -apple-system, sans-serif" font-size="34" font-weight="900" fill="#ffffff" text-anchor="middle" letter-spacing="4">DÖF SİSTEMİ</text>
+</svg>

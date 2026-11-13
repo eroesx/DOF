@@ -1,0 +1,47 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Plus+Jakarta+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;1,400&family=JetBrains+Mono:wght@400;500;600&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-display: "Plus Jakarta Sans", "Inter", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+}
+
+/* Custom scrollbars and styling */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+/* Print styling */
+@media print {
+  @page {
+    size: A4 portrait;
+    margin: 10mm;
+  }
+  
+  html, body {
+    background: #ffffff !important;
+    color: #0f172a !important;
+    height: auto !important;
+    overflow: visible !important;
+  }
+
+  /* Hide common navigation and fixed backdrops during print */
+  #main-header,
+  #sidebar-nav,
+  #qr-google-info-alert,
+  #qr-url-customizer-card {
+    display: none !important;
+  }
+}

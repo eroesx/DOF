@@ -1,0 +1,20 @@
+{
+  "name": "dof-functions",
+  "description": "DÖF Otomatik E-posta Bildirim Tetikleyicileri",
+  "main": "index.js",
+  "scripts": {
+    "serve": "firebase emulators:start --only functions",
+    "shell": "firebase functions:shell",
+    "start": "npm run shell",
+    "deploy": "firebase deploy --only functions"
+  },
+  "engines": {
+    "node": "18"
+  },
+  "dependencies": {
+    "firebase-admin": "^11.8.0",
+    "firebase-functions": "^4.3.1",
+    "nodemailer": "^6.9.1"
+  },
+  "private": true
+}
