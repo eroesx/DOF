@@ -46,6 +46,7 @@ import { DofForm, DofStatus, DofType, DofComment, Department, PanelUser } from "
 import { DofSingleQrModal } from "./DofSingleQrModal";
 import { DofQrScannerModal, ScanResult } from "./DofQrScannerModal";
 import { maskKvkkText } from "../lib/settings";
+import { isFieldInspectorDof } from "../lib/fieldClassification";
 
 interface DofMobileEditorProps {
   initialRefNo?: string | null;
@@ -1306,10 +1307,10 @@ export const DofMobileEditor: React.FC<DofMobileEditorProps> = ({
               </div>
               <div>
                 <span className="text-[10px] text-slate-400 font-bold uppercase block">Bildiren Kişi</span>
-                <span className="font-bold text-slate-800">{maskKvkkText(dof.reporterName, false, "İsimsiz")}</span>
+                <span className="font-bold text-slate-800">{maskKvkkText(dof.reporterName, false, "İsimsiz", isFieldInspectorDof(dof))}</span>
                 {dof.reporterContact && (
                   <span className="text-[11px] text-slate-500 ml-1.5 font-mono">
-                    ({maskKvkkText(dof.reporterContact)})
+                    ({maskKvkkText(dof.reporterContact, false, "-", isFieldInspectorDof(dof))})
                   </span>
                 )}
               </div>

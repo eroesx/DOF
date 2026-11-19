@@ -5,7 +5,7 @@ import express from "express";
 import path from "path";
 import fs from "fs";
 import { createServer as createViteServer } from "vite";
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI, Type, ThinkingLevel } from "@google/genai";
 import { initializeApp } from "firebase/app";
 import { getFirestore, collection, onSnapshot, addDoc, serverTimestamp } from "firebase/firestore";
 
@@ -346,6 +346,91 @@ Lütfen yanıtı kesinlikle geçerli bir JSON formatında döndür. JSON yapıs�
         ],
         feedbackDraft: "Bildiriminiz için teşekkür ederiz. Kalite yönetim ekibimiz konuyu en kısa sürede inceleyecektir."
       }
+    });
+  }
+});
+
+// API endpoint to classify a field non-conformity finding using Gemini AI (gemini-4-hydrogen)
+app.post("/api/classify-field-finding", async (req, res) => {
+  const { subject, description, proposedAction, location, availableUnits } = req.body || {};
+  const combinedText = [subject, description].filter(Boolean).join(" ").trim();
+
+  if (!combinedText) {
+    return res.status(400).json({ error: "Sınıflandırma için uygunsuzluk konusu veya tanımı gereklidir." });
+  }
+
+  const unitsList: string[] = Array.isArray(availableUnits) && availableUnits.length > 0
+    ? availableUnits.filter((u: unknown) => typeof u === "string" && u.trim().length > 0)
+    : ["Üretim", "İSG", "Bakım", "Kalite"];
+
+  try {
+    if (!process.env.GEMINI_API_KEY) {
+      throw new Error("GEMINI_API_KEY is not configured");
+    }
+
+    const ai = getGeminiClient();
+    const prompt = `Sen kıdemli bir Kalite ve İSG Yönetim Sistemi denetçisisin. Sahada tespit edilen aşağıdaki uygunsuzluk kaydını sınıflandır:
+- Saha / Lokasyon: ${location || "Belirtilmedi"}
+- Konu / Tanım: ${combinedText}
+- Önerilen Çözüm: ${proposedAction || "Belirtilmedi"}
+- Sistemdeki Mevcut Birimler: ${unitsList.join(", ")}
+
+Kurallar:
+1) "dofType": Eğer metinde gerçekleşmiş mevcut bir arıza, bozulma, sızıntı, kırılma, hasar, duruş, uygunsuzluk (örn: "kırılmış, sızdırıyor, yanmıyor, dökülmüş, çalışmıyor, eksik") varsa "düzeltici" seç. Eğer henüz olay/arıza gerçekleşmemiş ama potansiyel tehlike/risk (örn: "risk oluşturuyor, gevşemiş, düşebilir, aşınmaya başlamış, tehlike arz ediyor") söz konusuysa "önleyici" seç.
+2) "recommendedUnit": Verilen mevcut birimler listesinden en uygun tek bir birimi birebir aynı isimle seç.
+3) "procedure": Kısa ve profesyonel bir DÖF metodolojisi etiketi üret. Örn: "Düzeltici - 5 Neden Analizi", "Düzeltici - Acil Müdahale & Kök Neden", "Önleyici - Risk Analizi & Önlem", "Önleyici - FMEA Risk Değerlendirme".
+4) "reason": Türkçe tek kısa cümlelik gerekçe yaz.`;
+
+    const response = await ai.models.generateContent({
+      model: "gemini-4-hydrogen",
+      contents: prompt,
+      config: {
+        thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            dofType: {
+              type: Type.STRING,
+              enum: ["düzeltici", "önleyici"],
+            },
+            recommendedUnit: {
+              type: Type.STRING,
+            },
+            procedure: {
+              type: Type.STRING,
+            },
+            reason: {
+              type: Type.STRING,
+            },
+          },
+          required: ["dofType", "recommendedUnit", "procedure", "reason"],
+        },
+      },
+    });
+
+    const text = response.text;
+    if (!text) {
+      throw new Error("Empty Gemini classification response");
+    }
+
+    const parsed = JSON.parse(text);
+    const matchedUnit =
+      unitsList.find((u) => u.toLocaleLowerCase("tr-TR") === String(parsed.recommendedUnit || "").toLocaleLowerCase("tr-TR")) ||
+      unitsList[0];
+
+    res.json({
+      dofType: parsed.dofType === "önleyici" ? "önleyici" : "düzeltici",
+      recommendedUnit: matchedUnit,
+      procedure: parsed.procedure || (parsed.dofType === "önleyici" ? "Önleyici - Risk Analizi & Önlem" : "Düzeltici - 5 Neden Analizi"),
+      reason: parsed.reason || "Yapay zeka metin analizi ile sınıflandırıldı.",
+      source: "ai",
+    });
+  } catch (error: any) {
+    console.warn("Field classification AI fallback triggered:", error?.message || error);
+    res.status(200).json({
+      fallback: true,
+      error: error?.message || "AI classification unavailable",
     });
   }
 });

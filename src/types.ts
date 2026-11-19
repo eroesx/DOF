@@ -9,6 +9,31 @@ export interface DofComment {
   createdAt: string;
 }
 
+export type FieldSeverity = "Düşük" | "Orta" | "Yüksek" | "Kritik";
+export type FieldInspectionStatus =
+  | "Açık"
+  | "İşlemde"
+  | "Doğrulama Bekliyor"
+  | "Gecikmiş"
+  | "Kapandı";
+
+export interface FieldCartItem {
+  localId: string;
+  location: string;
+  subject: string;
+  description: string;
+  proposedAction?: string;
+  severity: FieldSeverity;
+  type: DofType;
+  targetUnit: string;
+  procedure: string;
+  imageUrl?: string;
+  classificationSource: "kural" | "ai" | "manuel";
+  classificationReason?: string;
+  isAiRefining?: boolean;
+  createdAtIso: string;
+}
+
 export interface DofForm {
   id?: string;
   refNo: string;
@@ -16,6 +41,13 @@ export interface DofForm {
   title: string;
   department: string;
   user_department?: string;
+  location?: string; // Saha / Lokasyon bilgisi
+  severity?: FieldSeverity; // Önem / Aciliyet Derecesi
+  procedure?: string; // DÖF İçin İzlenen Prosedür
+  inspectionStatus?: FieldInspectionStatus; // Saha Denetim Durumu
+  closedAt?: string; // Kapanma Tarihi (ISO / YYYY-MM-DD)
+  dofSource?: string; // DÖF Kaynağı (ör: "Saha Tesbiti", "Müşteri Şikayeti / Bildirim")
+  isFieldInspector?: boolean; // Saha Görevlisi tarafından oluşturulduysa KVKK maskelemesinden muaf
   reporterName: string;
   reporterContact: string; // Email or Phone number
   description: string;

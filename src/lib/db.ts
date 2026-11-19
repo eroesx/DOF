@@ -784,6 +784,7 @@ export interface BulkDeleteSelection {
   emailLogs?: boolean;
   passwordRequests?: boolean;
   accessRoles?: boolean;
+  systemSettings?: boolean;
 }
 
 export interface BulkDeleteResult {
@@ -795,6 +796,7 @@ export interface BulkDeleteResult {
     emailLogs: number;
     passwordRequests: number;
     accessRolesReset: boolean;
+    systemSettingsReset: boolean;
   };
   totalDeleted: number;
 }
@@ -839,6 +841,7 @@ export async function bulkDeleteSystemData(
     emailLogs: 0,
     passwordRequests: 0,
     accessRolesReset: false,
+    systemSettingsReset: false,
   };
 
   if (selection.dofs) {
@@ -913,6 +916,26 @@ export async function bulkDeleteSystemData(
       DEFAULT_ACCESS_ROLES.map((r) => ({ ...r, permissions: { ...r.permissions } }))
     );
     deletedCounts.accessRolesReset = true;
+  }
+
+  if (selection.systemSettings) {
+    const { DEFAULT_APP_VERSION, saveSystemSettings } = await import("./settings");
+    await saveSystemSettings({
+      preventiveActionDays: 7,
+      correctiveActionDays: 3,
+      defaultSoundSetting: "on",
+      defaultTabSetting: "dofs",
+      defaultStatusFilterSetting: "acik",
+      defaultNotificationSetting: "on",
+      isPasscodeLoginPassive: false,
+      isKvkkMaskingEnabled: false,
+      appVersion: DEFAULT_APP_VERSION,
+    });
+    if (typeof window !== "undefined") {
+      localStorage.removeItem("dof_admin_layout_order");
+      localStorage.removeItem("dof_dashboard_chart_config_v1");
+    }
+    deletedCounts.systemSettingsReset = true;
   }
 
   const totalDeleted =

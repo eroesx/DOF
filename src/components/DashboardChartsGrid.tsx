@@ -129,6 +129,7 @@ interface DashboardChartsGridProps {
   rejectedCount: number;
   statusFilter: string;
   setStatusFilter: (filter: string) => void;
+  setTypeFilter?: (type: string) => void;
   setSearchTerm: (term: string) => void;
   setDeptFilter: (dept: string) => void;
   setAdminSubTab: (tab: any) => void;
@@ -143,6 +144,7 @@ export const DashboardChartsGrid: React.FC<DashboardChartsGridProps> = ({
   rejectedCount,
   statusFilter,
   setStatusFilter,
+  setTypeFilter,
   setSearchTerm,
   setDeptFilter,
   setAdminSubTab,
@@ -361,8 +363,13 @@ export const DashboardChartsGrid: React.FC<DashboardChartsGridProps> = ({
             rejectedCount={rejectedCount}
             correctiveCount={visibleDofs.filter((d) => d.type === "düzeltici").length}
             preventiveCount={visibleDofs.filter((d) => d.type === "önleyici").length}
-            onFilterClick={(statusKey) => {
+            onFilterClick={(statusKey, typeKey) => {
               setStatusFilter(statusKey);
+              if (typeKey !== undefined && setTypeFilter) {
+                setTypeFilter(typeKey);
+              } else if (statusKey === "all" && setTypeFilter) {
+                setTypeFilter("all");
+              }
               setAdminSubTab("dofs");
             }}
           />
@@ -404,6 +411,7 @@ export const DashboardChartsGrid: React.FC<DashboardChartsGridProps> = ({
               setDeptFilter(deptName);
               setSearchTerm("");
               setStatusFilter("all");
+              if (setTypeFilter) setTypeFilter("all");
               setAdminSubTab("dofs");
             }}
           />

@@ -20,6 +20,7 @@ import { collection, getDocs } from "firebase/firestore";
 import { db } from "../firebase";
 import { Department } from "../types";
 import { printElement, exportPosterPdf } from "../utils/posterExporter";
+import { QrCodeImage, downloadQrPng } from "./QrCodeImage";
 
 interface DofQrGeneratorProps {
   onClose: () => void;
@@ -107,10 +108,7 @@ export default function DofQrGenerator({ onClose }: DofQrGeneratorProps) {
     : `${baseUrl}?view=submit`;
 
   // Color theme
-  const qrThemeColor = activeDept ? "059669" : "4f46e5";
   const qrHexColor = activeDept ? "#059669" : "#4f46e5";
-
-  const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=320x320&data=${encodeURIComponent(computedTargetUrl)}&color=${qrThemeColor}`;
 
   const handlePrint = async () => {
     setIsPrinting(true);
@@ -375,8 +373,10 @@ export default function DofQrGenerator({ onClose }: DofQrGeneratorProps) {
             <div className={`p-5 bg-slate-50 border-4 rounded-[32px] inline-block shadow-inner relative group ${
               activeDept ? "border-emerald-600" : "border-indigo-600"
             }`}>
-              <img
-                src={qrCodeUrl}
+              <QrCodeImage
+                value={computedTargetUrl}
+                size={320}
+                color={qrHexColor}
                 alt="DOF Formu QR Kodu"
                 className="w-60 h-60 object-contain rounded-2xl border border-white bg-white shadow"
               />
@@ -434,16 +434,21 @@ export default function DofQrGenerator({ onClose }: DofQrGeneratorProps) {
         {/* Info footer (Hidden during printing) */}
         <div className="bg-slate-50 border-t border-slate-100 px-6 py-4 text-center text-xs text-slate-400 print:hidden flex flex-col sm:flex-row sm:justify-between items-center gap-2">
           <span>Bu posteri iş yerinizdeki pano, depo, ofis ve ortak alanlara asabilirsiniz.</span>
-          <a
-            href={qrCodeUrl}
-            target="_blank"
-            rel="noreferrer"
-            download={`dof-qr-${activeDept ? activeDept.name.toLowerCase().replace(/[^a-z0-9]/g, "-") : "genel"}.png`}
-            className="inline-flex items-center gap-1 text-indigo-600 font-bold hover:underline"
+          <button
+            type="button"
+            onClick={() =>
+              void downloadQrPng(
+                computedTargetUrl,
+                `dof-qr-${activeDept ? activeDept.name.toLowerCase().replace(/[^a-z0-9]/g, "-") : "genel"}.png`,
+                600,
+                qrHexColor
+              )
+            }
+            className="inline-flex items-center gap-1 text-indigo-600 font-bold hover:underline cursor-pointer bg-transparent border-0 p-0"
             id="download-qr-link"
           >
             <Download className="h-3.5 w-3.5" /> Sadece QR Görselini İndir
-          </a>
+          </button>
         </div>
       </motion.div>
     </div>

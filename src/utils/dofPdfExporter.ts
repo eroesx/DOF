@@ -1,6 +1,7 @@
 import { jsPDF } from "jspdf";
 import { DofForm } from "../types";
 import { maskKvkkText } from "../lib/settings";
+import { isFieldInspectorDof } from "../lib/fieldClassification";
 
 /**
  * Helper to clean and normalize Turkish characters for standard Helvetica/Arial in jsPDF
@@ -167,9 +168,9 @@ export const exportDofPdf = async (dof: DofForm): Promise<void> => {
 
     drawMetaRow(
       "Bildiren Kisi",
-      maskKvkkText(dof.reporterName) || "Anonim / Belirtilmemis",
+      maskKvkkText(dof.reporterName, false, "-", isFieldInspectorDof(dof)) || "Anonim / Belirtilmemis",
       "Iletisim Bilgisi",
-      maskKvkkText(dof.reporterContact) || "Belirtilmemis",
+      maskKvkkText(dof.reporterContact, false, "-", isFieldInspectorDof(dof)) || "Belirtilmemis",
       y
     );
     y += 7.5;
@@ -279,7 +280,7 @@ export const exportDofPdf = async (dof: DofForm): Promise<void> => {
     doc.setFont("Helvetica", "normal");
     doc.setFontSize(7.5);
     doc.setTextColor(darkColor[0], darkColor[1], darkColor[2]);
-    doc.text(cleanPdfText(maskKvkkText(dof.reporterName) || "Saha Personeli"), margin, y);
+    doc.text(cleanPdfText(maskKvkkText(dof.reporterName, false, "-", isFieldInspectorDof(dof)) || "Saha Personeli"), margin, y);
     doc.text(cleanPdfText(dof.assignedUserName || "Kalite Yonetim Sorumlusu"), pageWidth - margin - 65, y);
 
     y += 4;

@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { DofForm } from "../types";
 import { printElement, exportPosterPdf } from "../utils/posterExporter";
+import { QrCodeImage, downloadQrPng } from "./QrCodeImage";
 
 interface DofSingleQrModalProps {
   dof: DofForm | null;
@@ -38,7 +39,6 @@ export const DofSingleQrModal: React.FC<DofSingleQrModalProps> = ({
 
   // Direct edit URL targeting this specific DOF
   const directEditUrl = `${window.location.origin}?view=edit&refNo=${encodeURIComponent(dof.refNo)}`;
-  const qrCodeImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=350x350&data=${encodeURIComponent(directEditUrl)}&color=4f46e5`;
 
   const handleCopyLink = () => {
     navigator.clipboard.writeText(directEditUrl);
@@ -156,8 +156,10 @@ export const DofSingleQrModal: React.FC<DofSingleQrModalProps> = ({
             {/* QR Code Frame */}
             <div className="flex flex-col items-center justify-center">
               <div className="p-4 bg-slate-50 border-2 border-indigo-500/30 rounded-3xl inline-block shadow-inner relative group">
-                <img
-                  src={qrCodeImageUrl}
+                <QrCodeImage
+                  value={directEditUrl}
+                  size={350}
+                  color="#4f46e5"
                   alt={`DÖF ${dof.refNo} QR Kodu`}
                   className="w-52 h-52 sm:w-60 sm:h-60 object-contain rounded-2xl border border-white bg-white shadow-sm"
                 />
@@ -224,16 +226,14 @@ export const DofSingleQrModal: React.FC<DofSingleQrModalProps> = ({
                 <FileDown className="h-3.5 w-3.5" />
                 {isPdfLoading ? "PDF Hazırlanıyor..." : "PDF Olarak Kaydet"}
               </button>
-              <a
-                href={qrCodeImageUrl}
-                download={`dof-qr-${dof.refNo}.png`}
-                target="_blank"
-                rel="noreferrer"
-                className="px-3 py-2 bg-white hover:bg-slate-100 border border-slate-200 text-slate-700 text-xs font-bold rounded-xl transition flex items-center gap-1.5 shadow-xs"
+              <button
+                type="button"
+                onClick={() => void downloadQrPng(directEditUrl, `dof-qr-${dof.refNo}.png`, 600, "#4f46e5")}
+                className="px-3 py-2 bg-white hover:bg-slate-100 border border-slate-200 text-slate-700 text-xs font-bold rounded-xl transition flex items-center gap-1.5 shadow-xs cursor-pointer"
               >
                 <Download className="h-3.5 w-3.5" />
                 QR İndir
-              </a>
+              </button>
             </div>
 
             <div className="flex items-center gap-2">

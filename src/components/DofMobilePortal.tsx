@@ -43,6 +43,7 @@ import { onAuthStateChanged } from "firebase/auth";
 import { db, auth } from "../firebase";
 import { DofForm, PanelUser, Department } from "../types";
 import { maskKvkkText, getAppVersion } from "../lib/settings";
+import { isFieldInspectorDof } from "../lib/fieldClassification";
 import { getRoleDisplayName } from "../lib/roles";
 import {
   authorizedQuery,
@@ -54,7 +55,7 @@ import {
 } from "../lib/db";
 
 interface DofMobilePortalProps {
-  onNavigate: (tab: "submit" | "track" | "admin" | "qr" | "edit") => void;
+  onNavigate: (tab: "submit" | "field-capture" | "track" | "admin" | "qr" | "edit") => void;
   onOpenScanner: () => void;
   onSearchRef: (refNo: string) => void;
   onOpenEdit?: (refNo: string) => void;
@@ -366,7 +367,7 @@ export const DofMobilePortal: React.FC<DofMobilePortalProps> = ({
     setEditorAuthError(null);
   };
 
-  const handleExecuteEditorLogin = async (targetView: "admin" | "edit") => {
+  const handleExecuteEditorLogin = async (targetView: "admin" | "edit" | "field-capture") => {
     if (!selectedEditorUser) return;
 
     // Check password if set
@@ -575,6 +576,31 @@ export const DofMobilePortal: React.FC<DofMobilePortalProps> = ({
             activeMetricFilter === "open" ? "text-white/80" : "text-slate-400"
           }`} />
         </button>
+
+        {/* Eylem 4: Sahada Hızlı Tespit & Toplu DÖF Dağıtım (Sadece giriş yapıldıktan sonra görünür) */}
+        {isLoggedIn && (
+          <button
+            type="button"
+            onClick={() => onNavigate("field-capture")}
+            id="portal-btn-field-capture"
+            className="md:col-span-3 w-full min-h-[76px] p-4 sm:p-5 bg-emerald-600 hover:bg-emerald-700 active:scale-[0.99] text-white rounded-2xl shadow-sm transition flex items-center justify-between gap-4 text-left cursor-pointer"
+          >
+            <div className="flex items-center gap-3.5 min-w-0">
+              <div className="w-12 h-12 rounded-2xl bg-white/15 flex items-center justify-center shrink-0">
+                <Camera className="h-6 w-6 text-white" />
+              </div>
+              <div className="min-w-0">
+                <span className="text-base font-black block leading-tight">
+                  Sahada Hızlı Tespit (Sepet Modülü)
+                </span>
+                <span className="text-xs text-emerald-100 block mt-0.5">
+                  Sabit saha seçimiyle seri tespit ekle ve birimlere toplu dağıt
+                </span>
+              </div>
+            </div>
+            <ChevronRight className="h-5 w-5 text-white/80 shrink-0" />
+          </button>
+        )}
       </div>
 
       {/* 3. Bekleyen İşlerim / Seçilen Özet Listesi */}
@@ -926,6 +952,13 @@ export const DofMobilePortal: React.FC<DofMobilePortalProps> = ({
                 >
                   Mobil Düzenleme
                 </button>
+                <button
+                  type="button"
+                  onClick={() => handleExecuteEditorLogin("field-capture")}
+                  className="col-span-2 w-full py-2.5 px-3 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-xs transition cursor-pointer shadow-md text-center"
+                >
+                  Sahada Hızlı Tespit Başlat
+                </button>
               </div>
             </div>
           </div>
@@ -1108,12 +1141,16 @@ export const DofMobilePortal: React.FC<DofMobilePortalProps> = ({
                   </span>
                 </div>
                 <div className="bg-slate-50 p-3 rounded-2xl border border-slate-100">
-                  <span className="text-[10px] font-bold text-slate-400 block uppercase">Bildiren Kişi</span>
+                  <span className="text-[10px] font-bold text-slate-400 block uppercase">
+                    Bildiren Kişi {isFieldInspectorDof(viewDetailModalDof) ? "• Saha Tesbiti" : ""}
+                  </span>
                   <span className="font-medium text-slate-700 block mt-0.5">
-                    {maskKvkkText(viewDetailModalDof.reporterName)}
+                    {maskKvkkText(viewDetailModalDof.reporterName, false, "-", isFieldInspectorDof(viewDetailModalDof))}
                   </span>
                   {viewDetailModalDof.reporterContact && (
-                    <span className="text-[10px] text-slate-400 block">{maskKvkkText(viewDetailModalDof.reporterContact)}</span>
+                    <span className="text-[10px] text-slate-400 block">
+                      {maskKvkkText(viewDetailModalDof.reporterContact, false, "-", isFieldInspectorDof(viewDetailModalDof))}
+                    </span>
                   )}
                 </div>
                 <div className="bg-slate-50 p-3 rounded-2xl border border-slate-100">

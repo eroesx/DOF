@@ -12,163 +12,188 @@ interface VectorPosterOptions {
   fileName?: string;
 }
 
+export interface PrintElementResult {
+  status: "printed" | "blocked" | "error";
+}
+
+const cleanupPrintPortal = (
+  originalTitle: string,
+  portal: HTMLElement | null,
+  pageStyleEl: HTMLStyleElement | null
+) => {
+  document.body.classList.remove("dof-custom-printing");
+  if (portal && portal.parentNode) {
+    portal.parentNode.removeChild(portal);
+  }
+  if (pageStyleEl && pageStyleEl.parentNode) {
+    pageStyleEl.parentNode.removeChild(pageStyleEl);
+  }
+  if (document.title !== originalTitle) {
+    document.title = originalTitle;
+  }
+};
+
 /**
- * Triggers clean print dialog targeting specifically the poster element via an isolated hidden iframe.
- * Prevents dark backdrop overlays, fixed container clipping, and browser iframe issues.
+ * Prints a target DOM element using an active-document print portal (#dof-print-sheet-portal).
+ * Preserves live Tailwind styles & user activation, normalizes Recharts SVG viewBoxes for A4,
+ * and reliably detects sandbox-blocked window.print() calls so callers can offer an A4 preview/PDF fallback.
  */
+export const printElementWithStatus = async (
+  elementId: string,
+  docTitle: string = "DÖF A4 Çıktı",
+  orientation: "portrait" | "landscape" = "portrait"
+): Promise<PrintElementResult> => {
+  const element = document.getElementById(elementId);
+  if (!element) {
+    console.warn(`Element #${elementId} not found.`);
+    return { status: "error" };
+  }
+
+  // Remove any leftover portal / style
+  document.getElementById("dof-print-sheet-portal")?.remove();
+  document.getElementById("dof-print-page-style")?.remove();
+  document.body.classList.remove("dof-custom-printing");
+
+  // Measure live SVGs before cloning so missing viewBoxes preserve exact aspect ratio
+  const liveSvgRects = Array.from(
+    element.querySelectorAll<SVGSVGElement>("svg.recharts-surface")
+  ).map((svg) => svg.getBoundingClientRect());
+
+  const clone = element.cloneNode(true) as HTMLElement;
+  clone.querySelectorAll(".print\\:hidden").forEach((el) => el.remove());
+
+  // Normalize Recharts wrappers & SVGs so charts fit cleanly on A4 without clipping
+  clone.querySelectorAll<HTMLElement>(".recharts-responsive-container").forEach((container) => {
+    container.style.width = "100%";
+    container.style.minWidth = "0";
+  });
+
+  clone.querySelectorAll<HTMLElement>(".recharts-wrapper").forEach((wrapper) => {
+    wrapper.style.width = "100%";
+    wrapper.style.maxWidth = "100%";
+    wrapper.style.height = "auto";
+  });
+
+  clone.querySelectorAll<SVGSVGElement>("svg.recharts-surface").forEach((svg, idx) => {
+    const wAttr = Number(svg.getAttribute("width"));
+    const hAttr = Number(svg.getAttribute("height"));
+    const liveRect = liveSvgRects[idx];
+    const w = wAttr > 0 ? wAttr : Math.round(liveRect?.width || 640);
+    const h = hAttr > 0 ? hAttr : Math.round(liveRect?.height || 260);
+    if (!svg.getAttribute("viewBox") && w > 0 && h > 0) {
+      svg.setAttribute("viewBox", `0 0 ${w} ${h}`);
+    }
+    svg.removeAttribute("width");
+    svg.removeAttribute("height");
+    svg.style.width = "100%";
+    svg.style.height = "auto";
+    svg.style.maxWidth = "100%";
+    svg.style.maxHeight = orientation === "landscape" ? "135mm" : "150mm";
+    svg.style.display = "block";
+    svg.style.margin = "0 auto";
+  });
+
+  // Create active-document portal
+  const portal = document.createElement("div");
+  portal.id = "dof-print-sheet-portal";
+
+  const wrapper = document.createElement("div");
+  wrapper.style.width = "100%";
+  wrapper.style.maxWidth = orientation === "landscape" ? "277mm" : "190mm";
+  wrapper.style.margin = "0 auto";
+  wrapper.style.background = "#ffffff";
+  wrapper.appendChild(clone);
+  portal.appendChild(wrapper);
+
+  const pageStyleEl = document.createElement("style");
+  pageStyleEl.id = "dof-print-page-style";
+  pageStyleEl.textContent = `
+    @page {
+      size: A4 ${orientation};
+      margin: ${orientation === "landscape" ? "8mm" : "10mm"};
+    }
+    #dof-print-sheet-portal * {
+      -webkit-print-color-adjust: exact !important;
+      print-color-adjust: exact !important;
+    }
+  `;
+
+  document.head.appendChild(pageStyleEl);
+  document.body.appendChild(portal);
+
+  const originalTitle = document.title;
+  document.title = docTitle;
+  document.body.classList.add("dof-custom-printing");
+
+  // Wait for incomplete <img> tags only if needed; vector SVG charts trigger print synchronously
+  const pendingImages: Promise<void>[] = [];
+  const imgs = portal.getElementsByTagName("img");
+  for (let i = 0; i < imgs.length; i++) {
+    const img = imgs[i];
+    if (!img.complete) {
+      pendingImages.push(
+        new Promise((res) => {
+          img.onload = () => res();
+          img.onerror = () => res();
+        })
+      );
+    }
+  }
+
+  if (pendingImages.length > 0) {
+    await Promise.all(pendingImages);
+  }
+
+  const executePrint = (): PrintElementResult => {
+    let beforePrintFired = false;
+    let cleaned = false;
+
+    const handleBeforePrint = () => {
+      beforePrintFired = true;
+    };
+
+    const doCleanup = () => {
+      if (cleaned) return;
+      cleaned = true;
+      window.removeEventListener("beforeprint", handleBeforePrint);
+      window.removeEventListener("afterprint", doCleanup);
+      cleanupPrintPortal(originalTitle, portal, pageStyleEl);
+    };
+
+    window.addEventListener("beforeprint", handleBeforePrint);
+    window.addEventListener("afterprint", doCleanup);
+
+    const start = typeof performance !== "undefined" ? performance.now() : Date.now();
+    try {
+      window.print();
+    } catch {
+      doCleanup();
+      return { status: "blocked" };
+    }
+    const elapsed = (typeof performance !== "undefined" ? performance.now() : Date.now()) - start;
+
+    // Chrome blocks window.print() silently in sandboxed iframes without allow-modals:
+    // beforeprint never fires and window.print() returns in < 50ms.
+    if (!beforePrintFired && elapsed < 80) {
+      doCleanup();
+      return { status: "blocked" };
+    }
+
+    // Fallback cleanup if afterprint isn't emitted by browser
+    setTimeout(doCleanup, 1500);
+    return { status: "printed" };
+  };
+
+  return executePrint();
+};
+
 export const printElement = async (
   elementId: string,
   docTitle: string = "DÖF QR Poster",
   orientation: "portrait" | "landscape" = "portrait"
 ): Promise<boolean> => {
-  const element = document.getElementById(elementId);
-  if (!element) {
-    console.warn(`Element #${elementId} not found, falling back to window.print()`);
-    window.print();
-    return false;
-  }
-
-  // Remove existing frame if any
-  const oldFrame = document.getElementById("dof-print-isolated-frame");
-  if (oldFrame) {
-    oldFrame.remove();
-  }
-
-  // Clone element so we can clean up any print:hidden controls
-  const clone = element.cloneNode(true) as HTMLElement;
-  const hiddenElements = clone.querySelectorAll(".print\\:hidden");
-  hiddenElements.forEach((el) => el.remove());
-
-  // Create isolated iframe
-  const iframe = document.createElement("iframe");
-  iframe.id = "dof-print-isolated-frame";
-  iframe.style.position = "fixed";
-  iframe.style.right = "0";
-  iframe.style.bottom = "0";
-  iframe.style.width = "0";
-  iframe.style.height = "0";
-  iframe.style.border = "none";
-  iframe.style.opacity = "0";
-  iframe.style.pointerEvents = "none";
-  iframe.style.zIndex = "-9999";
-  document.body.appendChild(iframe);
-
-  const iframeDoc = iframe.contentWindow?.document || iframe.contentDocument;
-  if (!iframeDoc) {
-    window.print();
-    return false;
-  }
-
-  // Gather stylesheet links and inline styles from main document
-  let stylesHtml = "";
-  const styleElements = document.querySelectorAll("style, link[rel='stylesheet']");
-  styleElements.forEach((el) => {
-    stylesHtml += el.outerHTML;
-  });
-
-  iframeDoc.open();
-  iframeDoc.write(`
-    <!DOCTYPE html>
-    <html lang="tr">
-      <head>
-        <meta charset="utf-8" />
-        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-        <title>${docTitle}</title>
-        ${stylesHtml}
-        <style>
-          @page {
-            size: A4 ${orientation};
-            margin: ${orientation === "landscape" ? "6mm" : "10mm"};
-          }
-          * {
-            -webkit-print-color-adjust: exact !important;
-            print-color-adjust: exact !important;
-            box-sizing: border-box;
-          }
-          html, body {
-            margin: 0;
-            padding: 0;
-            background: #ffffff !important;
-            color: #0f172a !important;
-            font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-            width: 100%;
-          }
-          .poster-print-wrapper {
-            width: 100%;
-            max-width: ${orientation === "landscape" ? "1060px" : "680px"};
-            margin: 0 auto;
-            padding: ${orientation === "landscape" ? "8px" : "20px"};
-            background: #ffffff;
-            box-sizing: border-box;
-          }
-          @media print {
-            body {
-              display: flex;
-              justify-content: center;
-              align-items: flex-start;
-              min-height: 100vh;
-            }
-            .poster-print-wrapper {
-              border: none !important;
-              box-shadow: none !important;
-              padding: 0 !important;
-              width: 100% !important;
-              max-width: 100% !important;
-            }
-          }
-        </style>
-      </head>
-      <body>
-        <div class="poster-print-wrapper">
-          ${clone.outerHTML}
-        </div>
-      </body>
-    </html>
-  `);
-  iframeDoc.close();
-
-  return new Promise((resolve) => {
-    // Wait for images to load
-    const images = iframeDoc.getElementsByTagName("img");
-    const imagePromises: Promise<any>[] = [];
-    for (let i = 0; i < images.length; i++) {
-      const img = images[i];
-      if (!img.complete) {
-        imagePromises.push(
-          new Promise((imgResolve) => {
-            img.onload = imgResolve;
-            img.onerror = imgResolve;
-          })
-        );
-      }
-    }
-
-    const triggerPrint = () => {
-      try {
-        iframe.contentWindow?.focus();
-        iframe.contentWindow?.print();
-        resolve(true);
-      } catch (err) {
-        console.error("Print frame error:", err);
-        window.print();
-        resolve(false);
-      } finally {
-        setTimeout(() => {
-          if (document.body.contains(iframe)) {
-            document.body.removeChild(iframe);
-          }
-        }, 4000);
-      }
-    };
-
-    if (imagePromises.length > 0) {
-      Promise.all(imagePromises).then(() => {
-        setTimeout(triggerPrint, 350);
-      });
-    } else {
-      setTimeout(triggerPrint, 350);
-    }
-  });
+  const result = await printElementWithStatus(elementId, docTitle, orientation);
+  return result.status === "printed";
 };
 
 /**

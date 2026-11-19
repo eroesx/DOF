@@ -30,9 +30,10 @@ export function isKvkkActive(): boolean {
 export function maskKvkkText(
   text?: string | null,
   isKvkkEnabled = false,
-  fallback = "-"
+  fallback = "-",
+  bypassKvkk = false
 ): string {
-  if (isKvkkEnabled || isKvkkActive()) {
+  if (!bypassKvkk && (isKvkkEnabled || isKvkkActive())) {
     return "*** Gizli (KVKK) ***";
   }
   return text?.trim() ? text : fallback;
@@ -176,7 +177,7 @@ export function getStoredSettings(): SystemSettings {
       localStorage.getItem("dof_admin_default_tab_setting") || "dofs",
     defaultStatusFilterSetting: (() => {
       const saved = localStorage.getItem("dof_admin_default_status_filter_setting");
-      return saved && saved !== "all" ? saved : "acik";
+      return saved || "acik";
     })(),
     defaultNotificationSetting:
       (localStorage.getItem("dof_admin_default_notification_setting") as any) ||
@@ -222,10 +223,9 @@ export async function syncSettingsFromFirestore(): Promise<SystemSettings> {
         );
       }
       if (data.defaultStatusFilterSetting) {
-        const eff = data.defaultStatusFilterSetting !== "all" ? data.defaultStatusFilterSetting : "acik";
         localStorage.setItem(
           "dof_admin_default_status_filter_setting",
-          eff
+          data.defaultStatusFilterSetting
         );
       }
       if (data.defaultNotificationSetting) {

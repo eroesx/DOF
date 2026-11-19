@@ -1,6 +1,5 @@
 import React from "react";
 import {
-  ResponsiveContainer,
   BarChart,
   Bar,
   XAxis,
@@ -9,6 +8,7 @@ import {
   Tooltip,
   Legend,
 } from "recharts";
+import { SafeResponsiveContainer } from "./SafeResponsiveContainer";
 import { TrendingUp, CheckCircle, AlertCircle, Calendar } from "lucide-react";
 import { DofForm } from "../types";
 
@@ -150,7 +150,7 @@ export const DofDashboardChart: React.FC<DofDashboardChartProps> = ({ dofs }) =>
             <span className="text-xs">Grafik oluşturmak için yeterli veri bulunmuyor.</span>
           </div>
         ) : (
-          <ResponsiveContainer width="100%" height="100%">
+          <SafeResponsiveContainer>
             <BarChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
               <XAxis dataKey="name" tick={{ fill: '#64748b', fontSize: 10, fontWeight: 600 }} axisLine={false} tickLine={false} />
@@ -175,7 +175,7 @@ export const DofDashboardChart: React.FC<DofDashboardChartProps> = ({ dofs }) =>
               <Bar dataKey="Aktif DÖF" fill="#f59e0b" radius={[4, 4, 0, 0]} />
               <Bar dataKey="Kapalı DÖF" fill="#10b981" radius={[4, 4, 0, 0]} />
             </BarChart>
-          </ResponsiveContainer>
+          </SafeResponsiveContainer>
         )}
       </div>
     </div>

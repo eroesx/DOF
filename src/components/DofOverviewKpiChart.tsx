@@ -1,6 +1,5 @@
 import React, { useState, useMemo } from "react";
 import {
-  ResponsiveContainer,
   ComposedChart,
   BarChart,
   Bar,
@@ -14,6 +13,7 @@ import {
   PieChart,
   Pie,
 } from "recharts";
+import { SafeResponsiveContainer } from "./SafeResponsiveContainer";
 import {
   TrendingUp,
   Clock,
@@ -406,7 +406,7 @@ export const DofOverviewKpiChart: React.FC<DofOverviewKpiChartProps> = ({
             </div>
 
             <div className="h-64 sm:h-72 w-full">
-              <ResponsiveContainer width="100%" height="100%">
+              <SafeResponsiveContainer>
                 <BarChart
                   data={volumeData}
                   margin={{ top: 15, right: 20, left: -10, bottom: 25 }}
@@ -459,7 +459,7 @@ export const DofOverviewKpiChart: React.FC<DofOverviewKpiChartProps> = ({
                     ))}
                   </Bar>
                 </BarChart>
-              </ResponsiveContainer>
+              </SafeResponsiveContainer>
             </div>
           </div>
         )}
@@ -472,7 +472,7 @@ export const DofOverviewKpiChart: React.FC<DofOverviewKpiChartProps> = ({
             </div>
 
             <div className="h-64 sm:h-72 w-full">
-              <ResponsiveContainer width="100%" height="100%">
+              <SafeResponsiveContainer>
                 <BarChart
                   data={typeComparisonData}
                   margin={{ top: 15, right: 20, left: -10, bottom: 25 }}
@@ -518,7 +518,7 @@ export const DofOverviewKpiChart: React.FC<DofOverviewKpiChartProps> = ({
                   <Bar dataKey="Bekleyen (İşlemde)" fill="#f59e0b" radius={[6, 6, 0, 0]} maxBarSize={38} />
                   <Bar dataKey="Tamamlanan" fill="#10b981" radius={[6, 6, 0, 0]} maxBarSize={38} />
                 </BarChart>
-              </ResponsiveContainer>
+              </SafeResponsiveContainer>
             </div>
           </div>
         )}
@@ -534,7 +534,7 @@ export const DofOverviewKpiChart: React.FC<DofOverviewKpiChartProps> = ({
             </div>
 
             <div className="h-64 sm:h-72 w-full">
-              <ResponsiveContainer width="100%" height="100%">
+              <SafeResponsiveContainer>
                 <ComposedChart
                   data={monthlyTrendData}
                   margin={{ top: 15, right: 20, left: -10, bottom: 25 }}
@@ -612,7 +612,7 @@ export const DofOverviewKpiChart: React.FC<DofOverviewKpiChartProps> = ({
                     activeDot={{ r: 6 }}
                   />
                 </ComposedChart>
-              </ResponsiveContainer>
+              </SafeResponsiveContainer>
             </div>
           </div>
         )}

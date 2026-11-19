@@ -1,6 +1,5 @@
 import React, { useState } from "react";
 import {
-  ResponsiveContainer,
   BarChart,
   Bar,
   XAxis,
@@ -12,6 +11,7 @@ import {
   Pie,
   Cell
 } from "recharts";
+import { SafeResponsiveContainer } from "./SafeResponsiveContainer";
 import { Clock, AlertTriangle, CheckCircle, TrendingUp, BarChart2, PieChart as PieIcon } from "lucide-react";
 import { DofForm } from "../types";
 import { computeTargetCompletionDate, getRemainingBusinessDays } from "../lib/settings";
@@ -165,9 +165,9 @@ export const DofDeadlineSummaryChart: React.FC<DofDeadlineSummaryChartProps> = (
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-center">
           {/* Visual Chart */}
-          <div className="lg:col-span-6 h-64 flex items-center justify-center">
+          <div className="lg:col-span-6 h-64 w-full min-w-0 flex items-center justify-center">
             {chartType === "bar" ? (
-              <ResponsiveContainer width="100%" height="100%">
+              <SafeResponsiveContainer>
                 <BarChart data={data} margin={{ top: 10, right: 10, left: -20, bottom: 5 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
                   <XAxis dataKey="name" tick={{ fontSize: 9, fill: "#64748b", fontWeight: "bold" }} />
@@ -179,9 +179,9 @@ export const DofDeadlineSummaryChart: React.FC<DofDeadlineSummaryChartProps> = (
                     ))}
                   </Bar>
                 </BarChart>
-              </ResponsiveContainer>
+              </SafeResponsiveContainer>
             ) : (
-              <ResponsiveContainer width="100%" height="100%">
+              <SafeResponsiveContainer>
                 <PieChart>
                   <Tooltip {...customTooltipStyle} />
                   <Pie
@@ -201,7 +201,7 @@ export const DofDeadlineSummaryChart: React.FC<DofDeadlineSummaryChartProps> = (
                   </Pie>
                   <Legend verticalAlign="bottom" height={36} iconSize={8} iconType="circle" wrapperStyle={{ fontSize: 10, fontWeight: "bold" }} />
                 </PieChart>
-              </ResponsiveContainer>
+              </SafeResponsiveContainer>
             )}
           </div>
 

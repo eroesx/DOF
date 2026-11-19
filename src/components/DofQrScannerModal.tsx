@@ -31,16 +31,46 @@ export const DofQrScannerModal: React.FC<DofQrScannerModalProps> = ({
   onClose,
   onScanSuccess,
 }) => {
+  const checkIsMobile = () => {
+    if (typeof window === "undefined") return false;
+    return window.innerWidth < 768 || /iphone|ipad|ipod|android|mobile/i.test(navigator.userAgent);
+  };
+
+  const [isMobileDevice, setIsMobileDevice] = useState<boolean>(checkIsMobile);
   const [scannerError, setScannerError] = useState<string | null>(null);
   const [isScanning, setIsScanning] = useState(false);
   const [manualCode, setManualCode] = useState("");
-  const [activeTab, setActiveTab] = useState<"camera" | "upload" | "manual">("camera");
+  const [activeTab, setActiveTab] = useState<"camera" | "upload" | "manual">(() =>
+    checkIsMobile() ? "camera" : "upload"
+  );
   const [hasScanned, setHasScanned] = useState(false);
   const [facingMode, setFacingMode] = useState<"environment" | "user">("environment");
 
   const scannerRef = useRef<Html5Qrcode | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const isCleaningUpRef = useRef(false);
+
+  useEffect(() => {
+    const syncDeviceMode = () => {
+      const mobile = checkIsMobile();
+      setIsMobileDevice(mobile);
+      if (!mobile) {
+        setActiveTab((prev) => (prev === "camera" ? "upload" : prev));
+      }
+    };
+    syncDeviceMode();
+    window.addEventListener("resize", syncDeviceMode);
+    return () => window.removeEventListener("resize", syncDeviceMode);
+  }, []);
+
+  useEffect(() => {
+    if (isOpen) {
+      const mobile = checkIsMobile();
+      setIsMobileDevice(mobile);
+      setActiveTab(mobile ? "camera" : "upload");
+      setScannerError(null);
+    }
+  }, [isOpen]);
 
   // Helper to parse scanned content
   const parseScannedText = (text: string): ScanResult => {
@@ -100,7 +130,7 @@ export const DofQrScannerModal: React.FC<DofQrScannerModalProps> = ({
   };
 
   const startScanner = async () => {
-    if (!isOpen) return;
+    if (!isOpen || !checkIsMobile()) return;
     setScannerError(null);
     setHasScanned(false);
 
@@ -249,7 +279,7 @@ export const DofQrScannerModal: React.FC<DofQrScannerModalProps> = ({
   };
 
   useEffect(() => {
-    if (isOpen && activeTab === "camera") {
+    if (isOpen && isMobileDevice && activeTab === "camera") {
       // Small delay to ensure DOM element is mounted
       const timer = setTimeout(() => {
         startScanner();
@@ -261,7 +291,7 @@ export const DofQrScannerModal: React.FC<DofQrScannerModalProps> = ({
     } else {
       stopScanner();
     }
-  }, [isOpen, activeTab, facingMode]);
+  }, [isOpen, isMobileDevice, activeTab, facingMode]);
 
   if (!isOpen) return null;
 
@@ -315,17 +345,19 @@ export const DofQrScannerModal: React.FC<DofQrScannerModalProps> = ({
 
           {/* Navigation Tabs */}
           <div className="flex border-b border-slate-100 bg-slate-50 p-1">
-            <button
-              onClick={() => setActiveTab("camera")}
-              className={`flex-1 py-2 text-xs font-bold rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer ${
-                activeTab === "camera"
-                  ? "bg-white text-indigo-600 shadow-xs"
-                  : "text-slate-500 hover:text-slate-700"
-              }`}
-            >
-              <Camera className="h-3.5 w-3.5" />
-              Kamera ile Tara
-            </button>
+            {isMobileDevice && (
+              <button
+                onClick={() => setActiveTab("camera")}
+                className={`flex-1 py-2 text-xs font-bold rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer ${
+                  activeTab === "camera"
+                    ? "bg-white text-indigo-600 shadow-xs"
+                    : "text-slate-500 hover:text-slate-700"
+                }`}
+              >
+                <Camera className="h-3.5 w-3.5" />
+                Kamera ile Tara
+              </button>
+            )}
             <button
               onClick={() => setActiveTab("upload")}
               className={`flex-1 py-2 text-xs font-bold rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer ${
@@ -352,7 +384,7 @@ export const DofQrScannerModal: React.FC<DofQrScannerModalProps> = ({
 
           {/* Body Content */}
           <div className="p-5 flex-1 overflow-y-auto space-y-4">
-            {activeTab === "camera" && (
+            {isMobileDevice && activeTab === "camera" && (
               <div className="space-y-3.5">
                 {/* Viewport Frame */}
                 <div className="relative w-full aspect-square max-w-[280px] mx-auto bg-slate-950 rounded-2xl overflow-hidden shadow-inner border-2 border-slate-800">

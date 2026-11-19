@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { 
   Lock, 
@@ -66,12 +66,15 @@ import {
   Database,
   Server,
   HardDrive,
-  Table
+  Table,
+  ClipboardCheck
 } from "lucide-react";
 import { DofSingleQrModal } from "./DofSingleQrModal";
 import { DofQrScannerModal, ScanResult } from "./DofQrScannerModal";
+import { QrCodeImage, downloadQrPng } from "./QrCodeImage";
 import { jsPDF } from "jspdf";
 import { printElement, exportPosterPdf } from "../utils/posterExporter";
+import { exportReportsSummaryPdf } from "../utils/reportPdfExporter";
 import { signInWithPopup, signOut, auth, googleProvider, db } from "../firebase";
 import { onAuthStateChanged, User as FirebaseUser } from "firebase/auth";
 import { onSnapshot, collection, query, orderBy } from "firebase/firestore";
@@ -125,6 +128,10 @@ import DofExecutiveSummaryCard from "./DofExecutiveSummaryCard";
 import DofFolderManager from "./DofFolderManager";
 import DofDatabaseSettings from "./DofDatabaseSettings";
 import DofRoleManager from "./DofRoleManager";
+import FieldQuickCapture from "./FieldQuickCapture";
+import FieldAuditReportView from "./FieldAuditReportView";
+import DofPerformancePanel from "./DofPerformancePanel";
+import { isFieldInspectorDof } from "../lib/fieldClassification";
 import { AccessRole } from "../types";
 import {
   getStoredAccessRoles,
@@ -292,12 +299,38 @@ export default function DofAdmin({ onNavigate }: DofAdminProps = {}) {
   const [isLoading, setIsLoading] = useState(false);
   const [selectedDof, setSelectedDof] = useState<DofForm | null>(null);
 
-  // Filters (Varsayılan olarak Açık & İşlemde DÖF'ler getirilir)
+  // Track manual user interaction so initial Firestore settings sync does not overwrite deliberate actions
+  const hasManualStatusFilterRef = useRef(false);
+  const hasManualTabChangeRef = useRef(false);
+
+  type AdminSubTab = "dashboard" | "dofs" | "folders" | "new_dof" | "field_capture" | "audit_report" | "users" | "roles" | "departments" | "workflow" | "reports" | "logs" | "remote" | "database";
+  const VALID_ADMIN_TABS: AdminSubTab[] = [
+    "dashboard",
+    "dofs",
+    "folders",
+    "new_dof",
+    "field_capture",
+    "audit_report",
+    "users",
+    "roles",
+    "departments",
+    "workflow",
+    "reports",
+    "logs",
+    "remote",
+    "database",
+  ];
+
+  // Filters (Ayarlardan kaydedilen varsayılan durum filtresi korunur)
   const [searchTerm, setSearchTerm] = useState("");
-  const [statusFilter, setStatusFilter] = useState<string>(() => {
+  const [statusFilter, setStatusFilterState] = useState<string>(() => {
     const saved = localStorage.getItem("dof_admin_default_status_filter_setting");
-    return saved && saved !== "all" ? saved : "acik";
+    return saved || "acik";
   });
+  const setStatusFilter = (val: React.SetStateAction<string>) => {
+    hasManualStatusFilterRef.current = true;
+    setStatusFilterState(val);
+  };
   const [typeFilter, setTypeFilter] = useState<string>("all");
   const [deptFilter, setDeptFilter] = useState<string>("all");
   const [isFiltersExpanded, setIsFiltersExpanded] = useState(false);
@@ -318,13 +351,17 @@ export default function DofAdmin({ onNavigate }: DofAdminProps = {}) {
   const [isCopied, setIsCopied] = useState(false);
 
   // Admin View Sub-Tab
-  const [adminSubTab, setAdminSubTab] = useState<"dashboard" | "dofs" | "folders" | "new_dof" | "users" | "roles" | "departments" | "workflow" | "reports" | "logs" | "remote" | "database">(() => {
+  const [adminSubTab, setAdminSubTabState] = useState<AdminSubTab>(() => {
     const saved = localStorage.getItem("dof_admin_default_tab_setting");
-    if (saved && ["dashboard", "dofs", "folders", "new_dof", "users", "roles", "departments", "workflow", "reports", "logs", "remote", "database"].includes(saved)) {
-      return saved as any;
+    if (saved && VALID_ADMIN_TABS.includes(saved as AdminSubTab)) {
+      return saved as AdminSubTab;
     }
-    return "dashboard";
+    return "dofs";
   });
+  const setAdminSubTab = (val: React.SetStateAction<AdminSubTab>) => {
+    hasManualTabChangeRef.current = true;
+    setAdminSubTabState(val);
+  };
 
   // Access Roles (Erişim Rolleri)
   const [accessRoles, setAccessRoles] = useState<AccessRole[]>(() => getStoredAccessRoles());
@@ -383,6 +420,8 @@ export default function DofAdmin({ onNavigate }: DofAdminProps = {}) {
   const [activePosterDept, setActivePosterDept] = useState<Department | null>(null);
   const [showPosterModal, setShowPosterModal] = useState(false);
   const [isPosterPdfLoading, setIsPosterPdfLoading] = useState(false);
+  const [isReportsPdfLoading, setIsReportsPdfLoading] = useState(false);
+  const [reportsPdfError, setReportsPdfError] = useState<string | null>(null);
   const [isPosterPrinting, setIsPosterPrinting] = useState(false);
 
   const handlePrintPoster = async () => {
@@ -484,6 +523,7 @@ export default function DofAdmin({ onNavigate }: DofAdminProps = {}) {
 
       if (email === "sahin@gmail.com") return false;
       if (email === "gokhan.eroglu@gmail.com") return true;
+      if (role === "admin" || role === "yönetici" || role === "yonetici" || roleDef.id === "admin") return true;
 
       const assignedUnits =
         departments.length > 0
@@ -491,7 +531,7 @@ export default function DofAdmin({ onNavigate }: DofAdminProps = {}) {
           : splitDepartmentNames(activePanelUser.department);
       if (assignedUnits.length > 0) return false;
 
-      return role === "admin" || roleDef.permissions.canManageSystemAdmin;
+      return roleDef.permissions.canManageSystemAdmin;
     }
 
     // 2. Check stored panel user session in localStorage
@@ -503,8 +543,9 @@ export default function DofAdmin({ onNavigate }: DofAdminProps = {}) {
       if (storedEmail === "sahin@gmail.com") return false;
       if (storedEmail === "gokhan.eroglu@gmail.com") return true;
       const roleDef = getRoleById(storedRole, accessRoles);
+      if (storedRole === "admin" || storedRole === "yönetici" || storedRole === "yonetici" || roleDef.id === "admin") return true;
       if (splitDepartmentNames(storedDept).length > 0) return false;
-      return storedRole === "admin" || roleDef.permissions.canManageSystemAdmin;
+      return roleDef.permissions.canManageSystemAdmin;
     }
 
     // 3. Fallback: only if user logged in purely via Google (not passcode) and no panel user session exists
@@ -629,7 +670,7 @@ export default function DofAdmin({ onNavigate }: DofAdminProps = {}) {
   
   // Program Parametre & Veritabanı Ayarları States
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [settingsModalTab, setSettingsModalTab] = useState<"parameters" | "database">("parameters");
+  const [settingsModalTab, setSettingsModalTab] = useState<"parameters" | "database" | "cleanup">("parameters");
   const [preventiveDaysSetting, setPreventiveDaysSetting] = useState<number>(() => {
     const val = Number(localStorage.getItem("dof_admin_preventive_days"));
     return !isNaN(val) && val > 0 ? val : 7;
@@ -641,12 +682,13 @@ export default function DofAdmin({ onNavigate }: DofAdminProps = {}) {
   const [defaultSoundSetting, setDefaultSoundSetting] = useState<"on" | "off" | "last" | string>(() => {
     return localStorage.getItem("dof_admin_default_sound_setting") || "on";
   });
-  const [defaultTabSetting, setDefaultTabSetting] = useState<"dofs" | "users" | "notifications" | string>(() => {
-    return localStorage.getItem("dof_admin_default_tab_setting") || "dofs";
+  const [defaultTabSetting, setDefaultTabSetting] = useState<string>(() => {
+    const saved = localStorage.getItem("dof_admin_default_tab_setting");
+    return saved && VALID_ADMIN_TABS.includes(saved as AdminSubTab) ? saved : "dofs";
   });
   const [defaultStatusFilterSetting, setDefaultStatusFilterSetting] = useState<string>(() => {
     const saved = localStorage.getItem("dof_admin_default_status_filter_setting");
-    return saved && saved !== "all" ? saved : "acik";
+    return saved || "acik";
   });
   const [defaultNotificationSetting, setDefaultNotificationSetting] = useState<"on" | "off" | string>(() => {
     return localStorage.getItem("dof_admin_default_notification_setting") || "on";
@@ -667,6 +709,7 @@ export default function DofAdmin({ onNavigate }: DofAdminProps = {}) {
     emailLogs: false,
     passwordRequests: false,
     accessRoles: false,
+    systemSettings: false,
   });
   const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
   const [isDeleteConfirmChecked, setIsDeleteConfirmChecked] = useState(false);
@@ -707,7 +750,8 @@ export default function DofAdmin({ onNavigate }: DofAdminProps = {}) {
       deleteSelection.folders &&
       deleteSelection.emailLogs &&
       deleteSelection.passwordRequests &&
-      deleteSelection.accessRoles;
+      deleteSelection.accessRoles &&
+      deleteSelection.systemSettings;
     const nextVal = !allSelected;
     setDeleteSelection({
       dofs: nextVal,
@@ -717,6 +761,7 @@ export default function DofAdmin({ onNavigate }: DofAdminProps = {}) {
       emailLogs: nextVal,
       passwordRequests: nextVal,
       accessRoles: nextVal,
+      systemSettings: nextVal,
     });
     if (!nextVal) {
       setIsDeleteConfirmOpen(false);
@@ -767,6 +812,21 @@ export default function DofAdmin({ onNavigate }: DofAdminProps = {}) {
         summaryParts.push("erişim rolleri sıfırlandı");
         setAccessRoles(DEFAULT_ACCESS_ROLES.map((r) => ({ ...r, permissions: { ...r.permissions } })));
       }
+      if (deleteSelection.systemSettings) {
+        summaryParts.push("parametre ayarları sıfırlandı");
+        setPreventiveDaysSetting(7);
+        setCorrectiveDaysSetting(3);
+        setDefaultSoundSetting("on");
+        setDefaultTabSetting("dofs");
+        setDefaultStatusFilterSetting("acik");
+        setStatusFilterState("acik");
+        hasManualStatusFilterRef.current = false;
+        setDefaultNotificationSetting("on");
+        setIsPasscodeLoginPassive(false);
+        setIsKvkkMaskingEnabled(false);
+        setAppVersionSetting(DEFAULT_APP_VERSION);
+        setIsMuted(false);
+      }
 
       setDeleteSelection({
         dofs: false,
@@ -776,6 +836,7 @@ export default function DofAdmin({ onNavigate }: DofAdminProps = {}) {
         emailLogs: false,
         passwordRequests: false,
         accessRoles: false,
+        systemSettings: false,
       });
       setIsDeleteConfirmOpen(false);
       setIsDeleteConfirmChecked(false);
@@ -794,13 +855,13 @@ export default function DofAdmin({ onNavigate }: DofAdminProps = {}) {
     }
   };
 
-  const getMaskedReporterName = (name?: string) => {
-    if (isKvkkMaskingEnabled) return "*** Gizli (KVKK) ***";
-    return name || "Anonim / Belirtilmemiş";
+  const getMaskedReporterName = (name?: string, dof?: DofForm | null) => {
+    if (isKvkkMaskingEnabled && !isFieldInspectorDof(dof)) return "*** Gizli (KVKK) ***";
+    return name || (isFieldInspectorDof(dof) ? "Saha Görevlisi" : "Anonim / Belirtilmemiş");
   };
 
-  const getMaskedReporterContact = (contact?: string) => {
-    if (isKvkkMaskingEnabled) return "*** Gizli (KVKK) ***";
+  const getMaskedReporterContact = (contact?: string, dof?: DofForm | null) => {
+    if (isKvkkMaskingEnabled && !isFieldInspectorDof(dof)) return "*** Gizli (KVKK) ***";
     return contact || "-";
   };
 
@@ -871,10 +932,20 @@ export default function DofAdmin({ onNavigate }: DofAdminProps = {}) {
       setCorrectiveDaysSetting(s.correctiveActionDays);
       if (s.appVersion) setAppVersionSetting(s.appVersion);
       if (s.defaultSoundSetting) setDefaultSoundSetting(s.defaultSoundSetting);
-      if (s.defaultTabSetting) setDefaultTabSetting(s.defaultTabSetting);
+      if (s.defaultTabSetting) {
+        const normalizedTab = VALID_ADMIN_TABS.includes(s.defaultTabSetting as AdminSubTab)
+          ? (s.defaultTabSetting as AdminSubTab)
+          : "dofs";
+        setDefaultTabSetting(normalizedTab);
+        if (!hasManualTabChangeRef.current) {
+          setAdminSubTabState(normalizedTab);
+        }
+      }
       if (s.defaultStatusFilterSetting) {
-        const eff = s.defaultStatusFilterSetting !== "all" ? s.defaultStatusFilterSetting : "acik";
-        setDefaultStatusFilterSetting(eff);
+        setDefaultStatusFilterSetting(s.defaultStatusFilterSetting);
+        if (!hasManualStatusFilterRef.current) {
+          setStatusFilterState(s.defaultStatusFilterSetting);
+        }
       }
       if (s.defaultNotificationSetting) setDefaultNotificationSetting(s.defaultNotificationSetting);
       setIsPasscodeLoginPassive(s.isPasscodeLoginPassive);
@@ -888,7 +959,7 @@ export default function DofAdmin({ onNavigate }: DofAdminProps = {}) {
     });
 
     const handleOpenSettingsEvent = (e?: Event) => {
-      const customEvt = e as CustomEvent<{ tab?: "parameters" | "database" }>;
+      const customEvt = e as CustomEvent<{ tab?: "parameters" | "database" | "cleanup" }>;
       const currentRoles = getStoredAccessRoles();
       const storedRole = localStorage.getItem("dof_admin_user_role");
       const currentEmail = (localStorage.getItem("dof_admin_authed_email") || "").toLowerCase().trim();
@@ -899,12 +970,19 @@ export default function DofAdmin({ onNavigate }: DofAdminProps = {}) {
       }
       if (customEvt?.detail?.tab === "database" && (isSuper || rolePerms.canManageSystemAdmin)) {
         setSettingsModalTab("database");
+      } else if (customEvt?.detail?.tab === "cleanup" && isSuper) {
+        setSettingsModalTab("cleanup");
       } else {
         setSettingsModalTab("parameters");
       }
       setIsSettingsOpen(true);
     };
     window.addEventListener("dof_open_settings", handleOpenSettingsEvent);
+
+    const handleOpenAuditReportEvent = () => {
+      setAdminSubTab("audit_report");
+    };
+    window.addEventListener("dof_open_audit_report", handleOpenAuditReportEvent);
 
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
@@ -913,6 +991,7 @@ export default function DofAdmin({ onNavigate }: DofAdminProps = {}) {
     return () => {
       unsubscribe();
       window.removeEventListener("dof_open_settings", handleOpenSettingsEvent);
+      window.removeEventListener("dof_open_audit_report", handleOpenAuditReportEvent);
     };
   }, []);
 
@@ -924,6 +1003,8 @@ export default function DofAdmin({ onNavigate }: DofAdminProps = {}) {
       if (tab === "dofs") return activeRolePerms.canViewDofs;
       if (tab === "folders") return activeRolePerms.canManageFolders;
       if (tab === "new_dof") return activeRolePerms.canCreateDof;
+      if (tab === "field_capture") return isSystemAdmin || activeRolePerms.canCreateDof || activeRolePerms.canViewDofs;
+      if (tab === "audit_report") return isSystemAdmin || activeRolePerms.canViewReports || activeRolePerms.canViewDofs;
       if (tab === "reports") return activeRolePerms.canViewReports;
       if (tab === "workflow") return activeRolePerms.canViewDofs || activeRolePerms.canEditDof;
       if (["users", "roles", "departments", "remote", "logs", "database"].includes(tab)) {
@@ -934,15 +1015,15 @@ export default function DofAdmin({ onNavigate }: DofAdminProps = {}) {
 
     if (!isTabAllowed(adminSubTab)) {
       if (activeRolePerms.canViewDashboard) {
-        setAdminSubTab("dashboard");
+        setAdminSubTabState("dashboard");
       } else if (activeRolePerms.canViewReports) {
-        setAdminSubTab("reports");
+        setAdminSubTabState("reports");
       } else if (activeRolePerms.canViewDofs) {
-        setAdminSubTab("dofs");
+        setAdminSubTabState("dofs");
       } else if (activeRolePerms.canManageFolders) {
-        setAdminSubTab("folders");
+        setAdminSubTabState("folders");
       } else if (activeRolePerms.canCreateDof) {
-        setAdminSubTab("new_dof");
+        setAdminSubTabState("new_dof");
       }
     }
   }, [activePanelUser, adminSubTab, activeRolePerms, isSystemAdmin]);
@@ -2056,7 +2137,7 @@ export default function DofAdmin({ onNavigate }: DofAdminProps = {}) {
     const st = (dof.status || "").toLowerCase().trim();
     const isResolved = st === "cozuldu" || st === "çözüldü" || st === "tamamlandi" || st === "tamamlandı";
     const isRejected = st === "reddedildi" || st === "iptal";
-    const isOpen = st === "yeni" || st === "inceleniyor";
+    const isOpen = st === "yeni" || st === "inceleniyor" || st === "beklemede" || st === "islemde";
 
     const matchesStatus = 
       statusFilter === "all" || 
@@ -2069,7 +2150,11 @@ export default function DofAdmin({ onNavigate }: DofAdminProps = {}) {
         : (statusFilter === "tamamlandi" || statusFilter === "cozuldu")
         ? isResolved
         : st === statusFilter);
-    const matchesType = typeFilter === "all" || dof.type === typeFilter;
+    const matchesType =
+      typeFilter === "all" ||
+      (typeFilter === "saha_tespiti"
+        ? isFieldInspectorDof(dof)
+        : dof.type === typeFilter);
     const matchesDept = deptFilter === "all" || dof.department === deptFilter;
 
     const matchesReferral = 
@@ -2136,11 +2221,12 @@ export default function DofAdmin({ onNavigate }: DofAdminProps = {}) {
   }).length : 0;
   const openCount = visibleDofs.filter((d) => {
     const st = (d.status || "").toLowerCase().trim();
-    return st === "yeni" || st === "inceleniyor";
+    return st === "yeni" || st === "inceleniyor" || st === "beklemede" || st === "islemde";
   }).length;
   const closedCount = isSystemAdmin ? (resolvedCount + rejectedCount) : resolvedCount;
   const correctiveCount = visibleDofs.filter((d) => d.type === "düzeltici").length;
   const preventiveCount = visibleDofs.filter((d) => d.type === "önleyici").length;
+  const fieldInspectionCount = visibleDofs.filter((d) => isFieldInspectorDof(d)).length;
   const myTasksCount = visibleDofs.filter((d) => isDofAssignedToActiveUser(d)).length;
 
   const isAdminOrEditor = isSystemAdmin || activeRolePerms.canEditDof;
@@ -2450,7 +2536,7 @@ export default function DofAdmin({ onNavigate }: DofAdminProps = {}) {
       y += 8;
       drawMetaRow("Birim", dof.department || "-", "Sorumlu", dof.assignedUserName || "Atanmamis", y);
       y += 8;
-      drawMetaRow("Bildiren Kisi", getMaskedReporterName(dof.reporterName), "Bildiren Iletisim", getMaskedReporterContact(dof.reporterContact), y);
+      drawMetaRow("Bildiren Kisi", getMaskedReporterName(dof.reporterName, dof), "Bildiren Iletisim", getMaskedReporterContact(dof.reporterContact, dof), y);
       y += 8;
       drawMetaRow("Aciliyet Derecesi", riskInfo.level || "Orta", "Risk Skoru", `${riskInfo.score} / 15`, y);
       y += 14;
@@ -4210,9 +4296,9 @@ export default function DofAdmin({ onNavigate }: DofAdminProps = {}) {
             <div className="grid grid-cols-2 gap-y-4 gap-x-2 text-xs">
               <div>
                 <span className="text-slate-400 font-medium block">Oluşturan</span>
-                <span className="font-bold text-slate-800 text-sm mt-0.5 block">{getMaskedReporterName(dof.reporterName)}</span>
+                <span className="font-bold text-slate-800 text-sm mt-0.5 block">{getMaskedReporterName(dof.reporterName, dof)}</span>
                 {dof.reporterContact && (
-                  <span className="text-[11px] text-slate-500 font-mono mt-0.5 block">{getMaskedReporterContact(dof.reporterContact)}</span>
+                  <span className="text-[11px] text-slate-500 font-mono mt-0.5 block">{getMaskedReporterContact(dof.reporterContact, dof)}</span>
                 )}
               </div>
               <div>
@@ -4225,7 +4311,9 @@ export default function DofAdmin({ onNavigate }: DofAdminProps = {}) {
               </div>
               <div>
                 <span className="text-slate-400 font-medium block">DÖF Kaynağı</span>
-                <span className="font-bold text-slate-800 text-sm mt-0.5 block">Müşteri Şikayeti / Bildirim</span>
+                <span className="font-bold text-slate-800 text-sm mt-0.5 block">
+                  {dof.dofSource || (isFieldInspectorDof(dof) ? "Saha Tesbiti" : "Müşteri Şikayeti / Bildirim")}
+                </span>
               </div>
             </div>
           </div>
@@ -4527,9 +4615,11 @@ export default function DofAdmin({ onNavigate }: DofAdminProps = {}) {
               <tbody className="divide-y divide-slate-100">
                 <tr className="hover:bg-slate-50/50 transition">
                   <td className="p-3 font-mono text-[10px] text-slate-500">{formatDate(dof.createdAt)}</td>
-                  <td className="p-3 text-slate-700 font-semibold">{getMaskedReporterName(dof.reporterName)}</td>
+                  <td className="p-3 text-slate-700 font-semibold">{getMaskedReporterName(dof.reporterName, dof)}</td>
                   <td className="p-3 capitalize text-indigo-600 font-bold">{dof.type}</td>
-                  <td className="p-3 text-slate-600">Sistem Girişi</td>
+                  <td className="p-3 text-slate-600">
+                    {dof.dofSource || (isFieldInspectorDof(dof) ? "Saha Tesbiti" : "Sistem Girişi")}
+                  </td>
                   <td className="p-3">
                     <span className="inline-flex items-center gap-1 text-[10px] bg-blue-50 text-blue-700 border border-blue-100 px-2 py-0.5 rounded-full font-bold">
                       OLUŞTURULDU
@@ -5273,7 +5363,7 @@ export default function DofAdmin({ onNavigate }: DofAdminProps = {}) {
                     {activeNotification.title}
                   </h4>
                   <p className="text-[10px] text-slate-400 line-clamp-2">
-                    {activeNotification.department} • {getMaskedReporterName(activeNotification.reporterName)}
+                    {activeNotification.department} • {getMaskedReporterName(activeNotification.reporterName, activeNotification)}
                   </p>
 
                   <div className="pt-2 flex gap-2">
@@ -5328,7 +5418,7 @@ export default function DofAdmin({ onNavigate }: DofAdminProps = {}) {
       )}
 
       {/* Mobile Top Navigation Bar + Quick Switch Strip */}
-      <div className="lg:hidden bg-slate-900 text-white px-3.5 py-2.5 flex items-center justify-between gap-2 border-b border-slate-800 rounded-t-2xl">
+      <div className="lg:hidden bg-slate-900 text-white px-3.5 py-2.5 flex items-center justify-between gap-2 border-b border-slate-800 rounded-t-2xl print:hidden">
         <div className="flex items-center gap-2.5 min-w-0">
           <span className="p-2 bg-indigo-600 text-white rounded-xl shadow-sm shrink-0">
             <Shield className="h-4 w-4" />
@@ -5381,7 +5471,7 @@ export default function DofAdmin({ onNavigate }: DofAdminProps = {}) {
       </div>
 
       {/* Mobile 1-Tap Horizontal Quick Navigation Strip */}
-      <div className="lg:hidden bg-slate-50 border-x border-b border-slate-200 px-2.5 py-2 flex items-center gap-1.5 overflow-x-auto no-scrollbar">
+      <div className="lg:hidden bg-slate-50 border-x border-b border-slate-200 px-2.5 py-2 flex items-center gap-1.5 overflow-x-auto no-scrollbar print:hidden">
         {activeRolePerms.canViewDashboard && (
           <button
             type="button"
@@ -5400,10 +5490,7 @@ export default function DofAdmin({ onNavigate }: DofAdminProps = {}) {
         {activeRolePerms.canViewDofs && (
           <button
             type="button"
-            onClick={() => {
-              if (statusFilter === "all") setStatusFilter("acik");
-              setAdminSubTab("dofs");
-            }}
+            onClick={() => setAdminSubTab("dofs")}
             className={`min-h-[38px] px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap shrink-0 flex items-center gap-1.5 transition cursor-pointer tabular-nums ${
               adminSubTab === "dofs"
                 ? "bg-slate-900 text-white shadow-xs"
@@ -5449,6 +5536,36 @@ export default function DofAdmin({ onNavigate }: DofAdminProps = {}) {
           >
             <Plus className="h-3.5 w-3.5 shrink-0" />
             <span>Yeni DÖF</span>
+          </button>
+        )}
+
+        {(isSystemAdmin || activeRolePerms.canCreateDof || activeRolePerms.canViewDofs) && (
+          <button
+            type="button"
+            onClick={() => setAdminSubTab("field_capture")}
+            className={`min-h-[38px] px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap shrink-0 flex items-center gap-1.5 transition cursor-pointer ${
+              adminSubTab === "field_capture"
+                ? "bg-emerald-600 text-white shadow-xs"
+                : "bg-white text-emerald-700 border border-emerald-200 hover:bg-emerald-50"
+            }`}
+          >
+            <Camera className="h-3.5 w-3.5 shrink-0" />
+            <span>Saha Tespit</span>
+          </button>
+        )}
+
+        {(isSystemAdmin || activeRolePerms.canViewReports || activeRolePerms.canViewDofs) && (
+          <button
+            type="button"
+            onClick={() => setAdminSubTab("audit_report")}
+            className={`min-h-[38px] px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap shrink-0 flex items-center gap-1.5 transition cursor-pointer ${
+              adminSubTab === "audit_report"
+                ? "bg-slate-900 text-white shadow-xs"
+                : "bg-white text-slate-700 border border-slate-200 hover:bg-slate-100"
+            }`}
+          >
+            <ClipboardCheck className="h-3.5 w-3.5 shrink-0" />
+            <span>Denetim Tablosu</span>
           </button>
         )}
 
@@ -5532,7 +5649,7 @@ export default function DofAdmin({ onNavigate }: DofAdminProps = {}) {
           onMouseEnter={() => setIsSidebarHovered(true)}
           onMouseLeave={() => setIsSidebarHovered(false)}
           className={`
-            bg-slate-900 text-slate-300 flex-col border-r border-slate-800 transition-all duration-300 ease-in-out
+            print:hidden bg-slate-900 text-slate-300 flex-col border-r border-slate-800 transition-all duration-300 ease-in-out
             ${isMobileSidebarOpen 
               ? "fixed inset-y-0 left-0 w-72 max-w-[85vw] z-[70] flex shadow-2xl translate-x-0 opacity-100 pointer-events-auto" 
               : "hidden lg:flex"
@@ -5664,9 +5781,6 @@ export default function DofAdmin({ onNavigate }: DofAdminProps = {}) {
                   {activeRolePerms.canViewDofs && (
                     <button
                       onClick={() => {
-                        if (statusFilter === "all") {
-                          setStatusFilter("acik");
-                        }
                         setAdminSubTab("dofs");
                         setIsMobileSidebarOpen(false);
                       }}
@@ -5743,6 +5857,44 @@ export default function DofAdmin({ onNavigate }: DofAdminProps = {}) {
                     >
                       <Plus className="h-5 w-5 shrink-0" />
                       {isExpanded && <span className="truncate flex-1">Yeni DÖF Oluşturma</span>}
+                    </button>
+                  )}
+
+                  {/* Sahada Hızlı Tespit Tab */}
+                  {(isSystemAdmin || activeRolePerms.canCreateDof || activeRolePerms.canViewDofs) && (
+                    <button
+                      onClick={() => {
+                        setAdminSubTab("field_capture");
+                        setIsMobileSidebarOpen(false);
+                      }}
+                      className={`flex items-center gap-3 px-3 py-2.5 text-xs font-bold rounded-xl transition cursor-pointer text-left relative ${
+                        adminSubTab === "field_capture"
+                          ? "bg-emerald-600 text-white shadow-md shadow-emerald-950/60"
+                          : "text-slate-400 hover:bg-slate-800 hover:text-slate-200"
+                      } ${!isExpanded ? "justify-center" : ""}`}
+                      title={!isExpanded ? "Sahada Hızlı Tespit" : undefined}
+                    >
+                      <Camera className="h-5 w-5 shrink-0" />
+                      {isExpanded && <span className="truncate flex-1">Sahada Hızlı Tespit</span>}
+                    </button>
+                  )}
+
+                  {/* Denetim & Raporlama Tablosu */}
+                  {(isSystemAdmin || activeRolePerms.canViewReports || activeRolePerms.canViewDofs) && (
+                    <button
+                      onClick={() => {
+                        setAdminSubTab("audit_report");
+                        setIsMobileSidebarOpen(false);
+                      }}
+                      className={`flex items-center gap-3 px-3 py-2.5 text-xs font-bold rounded-xl transition cursor-pointer text-left relative ${
+                        adminSubTab === "audit_report"
+                          ? "bg-indigo-600 text-white shadow-md shadow-indigo-950/60"
+                          : "text-slate-400 hover:bg-slate-800 hover:text-slate-200"
+                      } ${!isExpanded ? "justify-center" : ""}`}
+                      title={!isExpanded ? "Denetim & Raporlama" : undefined}
+                    >
+                      <ClipboardCheck className="h-5 w-5 shrink-0" />
+                      {isExpanded && <span className="truncate flex-1">Denetim & Raporlama</span>}
                     </button>
                   )}
 
@@ -5939,6 +6091,7 @@ export default function DofAdmin({ onNavigate }: DofAdminProps = {}) {
                     if (!activeRolePerms.canViewDofs) return;
                     setStatusFilter(status);
                     if (type !== undefined) setTypeFilter(type);
+                    else if (status === "all") setTypeFilter("all");
                     if (adminSubTab !== "dofs") setAdminSubTab("dofs");
                   }}
                 />
@@ -6108,10 +6261,7 @@ export default function DofAdmin({ onNavigate }: DofAdminProps = {}) {
                   {activeRolePerms.canViewDofs && (
                     <button
                       type="button"
-                      onClick={() => {
-                        setStatusFilter("acik");
-                        setAdminSubTab("dofs");
-                      }}
+                      onClick={() => setAdminSubTab("dofs")}
                       className={`min-h-[44px] px-3.5 py-2.5 bg-slate-900 hover:bg-slate-950 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition cursor-pointer ${
                         !activeRolePerms.canCreateDof ? "col-span-2" : ""
                       }`}
@@ -6249,6 +6399,7 @@ export default function DofAdmin({ onNavigate }: DofAdminProps = {}) {
                         rejectedCount={rejectedCount}
                         statusFilter={statusFilter}
                         setStatusFilter={setStatusFilter}
+                        setTypeFilter={setTypeFilter}
                         setSearchTerm={setSearchTerm}
                         setDeptFilter={setDeptFilter}
                         setAdminSubTab={(tab) => {
@@ -6342,6 +6493,7 @@ export default function DofAdmin({ onNavigate }: DofAdminProps = {}) {
             rejectedCount={rejectedCount}
             statusFilter={statusFilter}
             setStatusFilter={setStatusFilter}
+            setTypeFilter={setTypeFilter}
             setSearchTerm={setSearchTerm}
             setDeptFilter={setDeptFilter}
             setAdminSubTab={(tab) => {
@@ -6493,7 +6645,7 @@ export default function DofAdmin({ onNavigate }: DofAdminProps = {}) {
                     : "bg-amber-100/60 border-2 border-amber-500 ring-4 ring-amber-500/10"
                   : urgentCount > 0
                     ? "bg-rose-50/50 border border-rose-200 hover:bg-rose-50 hover:border-rose-300"
-                    : "bg-amber-5/40 border border-amber-200/50 hover:bg-amber-50/70 hover:border-amber-300"
+                    : "bg-amber-50/40 border border-amber-200/50 hover:bg-amber-50/70 hover:border-amber-300"
               }`}
             >
               {urgentCount > 0 ? (
@@ -6767,6 +6919,23 @@ export default function DofAdmin({ onNavigate }: DofAdminProps = {}) {
           </div>
         )}
 
+        {/* Performans Paneli (Dashboard En Alt Bölümü) */}
+        {adminSubTab === "dashboard" && activeRolePerms.canViewDashboard && (
+          <div style={{ order: 99 }} className="w-full pt-2">
+            <DofPerformancePanel
+              dofs={visibleDofs}
+              onNavigateToDofs={(nextStatus, nextDept) => {
+                if (!activeRolePerms.canViewDofs) return;
+                setStatusFilter(nextStatus);
+                setDeptFilter(nextDept || "all");
+                setTypeFilter("all");
+                setSearchTerm("");
+                setAdminSubTab("dofs");
+              }}
+            />
+          </div>
+        )}
+
         {/* Sub-Tab Selectors */}
         {adminSubTab !== "dashboard" && renderLayoutWrapper(
           "tabs",
@@ -6812,6 +6981,28 @@ export default function DofAdmin({ onNavigate }: DofAdminProps = {}) {
                 />
               </div>
             )}
+
+            {adminSubTab === "field_capture" &&
+              (isSystemAdmin || activeRolePerms.canCreateDof || activeRolePerms.canViewDofs) && (
+                <FieldQuickCapture
+                  availableDepartments={sortedDepartments}
+                  onDispatched={() => {
+                    fetchAllDofs();
+                  }}
+                  onGoToAuditReport={() => setAdminSubTab("audit_report")}
+                />
+              )}
+
+            {adminSubTab === "audit_report" &&
+              (isSystemAdmin || activeRolePerms.canViewReports || activeRolePerms.canViewDofs) && (
+                <FieldAuditReportView
+                  dofs={visibleDofs}
+                  departments={sortedDepartments}
+                  canEdit={isSystemAdmin || activeRolePerms.canEditDof}
+                  onRefresh={fetchAllDofs}
+                  onOpenFieldCapture={() => setAdminSubTab("field_capture")}
+                />
+              )}
 
             {adminSubTab === "departments" && (isSystemAdmin || activeRolePerms.canManageSystemAdmin) && (
               <div className="space-y-6">
@@ -7148,21 +7339,20 @@ export default function DofAdmin({ onNavigate }: DofAdminProps = {}) {
                           Tüm genel birim tanımlamalarının QR kodudur. Herhangi bir özel ayrım barındırmayan genel bildirim formuna yönlendirir.
                         </p>
                         <div className="flex flex-col items-center gap-3 bg-white p-4 rounded-xl border border-indigo-100/50 shadow-sm">
-                          <img
-                            referrerPolicy="no-referrer"
-                            src={`https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(window.location.origin + "?view=submit")}`}
+                          <QrCodeImage
+                            value={window.location.origin + "?view=submit"}
+                            size={150}
                             alt="Genel QR Kodu"
                             className="w-32 h-32"
                           />
                           <div className="flex gap-2 w-full">
-                            <a
-                              href={`https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(window.location.origin + "?view=submit")}`}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="flex-1 inline-flex items-center justify-center gap-1.5 py-1.5 px-2 bg-indigo-600 hover:bg-indigo-700 text-white text-[10px] font-bold rounded-lg transition"
+                            <button
+                              type="button"
+                              onClick={() => void downloadQrPng(window.location.origin + "?view=submit", "genel-dof-qr.png", 600)}
+                              className="flex-1 inline-flex items-center justify-center gap-1.5 py-1.5 px-2 bg-indigo-600 hover:bg-indigo-700 text-white text-[10px] font-bold rounded-lg transition cursor-pointer"
                             >
                               <Download className="h-3 w-3" /> QR İndir
-                            </a>
+                            </button>
                             <button
                               type="button"
                               onClick={handleCopyPublic}
@@ -7296,9 +7486,9 @@ export default function DofAdmin({ onNavigate }: DofAdminProps = {}) {
                                   </div>
 
                                   <div className="flex items-center gap-3 bg-slate-50 p-2.5 rounded-xl border border-slate-100 mt-3">
-                                    <img
-                                      referrerPolicy="no-referrer"
-                                      src={`https://api.qrserver.com/v1/create-qr-code/?size=100x100&data=${encodeURIComponent(qrUrl)}`}
+                                    <QrCodeImage
+                                      value={qrUrl}
+                                      size={100}
                                       alt="QR Kodu"
                                       className="w-16 h-16 bg-white border border-slate-100 p-0.5 rounded-lg"
                                     />
@@ -7308,14 +7498,13 @@ export default function DofAdmin({ onNavigate }: DofAdminProps = {}) {
                                         {qrUrl}
                                       </p>
                                       <div className="flex gap-2 mt-1.5">
-                                        <a
-                                          href={`https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(qrUrl)}`}
-                                          target="_blank"
-                                          rel="noreferrer"
-                                          className="inline-flex items-center gap-1 text-[9px] font-bold text-indigo-700 hover:underline"
+                                        <button
+                                          type="button"
+                                          onClick={() => void downloadQrPng(qrUrl, `dof-qr-${dept.name.toLowerCase().replace(/[^a-z0-9]/g, "-")}.png`, 600)}
+                                          className="inline-flex items-center gap-1 text-[9px] font-bold text-indigo-700 hover:underline cursor-pointer bg-transparent border-0 p-0"
                                         >
                                           <Download className="h-2.5 w-2.5" /> Resmi İndir
-                                        </a>
+                                        </button>
                                         <button
                                           type="button"
                                           onClick={() => handleCopyDeptUrl(dept.id!, qrUrl)}
@@ -7615,7 +7804,57 @@ export default function DofAdmin({ onNavigate }: DofAdminProps = {}) {
                             : `Sadece ${activeUserAuthorizedUnitLabel || "biriminize"} ait DÖF performans metrikleri ve analitik veriler.`}
                         </p>
                       </div>
+                      <div className="flex items-center gap-2.5 shrink-0 print:hidden">
+                        <button
+                          type="button"
+                          disabled={isReportsPdfLoading}
+                          onClick={async () => {
+                            setIsReportsPdfLoading(true);
+                            setReportsPdfError(null);
+                            try {
+                              const ok = await exportReportsSummaryPdf({
+                                dofs: reportsDofs,
+                                departments: visibleDepartments,
+                                scopeLabel: canViewGlobalReports
+                                  ? "Tüm Birimler"
+                                  : activeUserAuthorizedUnitLabel || "Biriminiz",
+                              });
+                              if (!ok) {
+                                setReportsPdfError("PDF dosyası oluşturulurken bir sorun oluştu. Lütfen tekrar deneyin.");
+                              }
+                            } finally {
+                              setIsReportsPdfLoading(false);
+                            }
+                          }}
+                          className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 active:scale-[0.99] disabled:opacity-60 disabled:cursor-not-allowed text-white text-xs font-bold shadow-sm transition cursor-pointer whitespace-nowrap shrink-0"
+                        >
+                          {isReportsPdfLoading ? (
+                            <>
+                              <RefreshCw className="h-4 w-4 animate-spin" />
+                              PDF Hazırlanıyor...
+                            </>
+                          ) : (
+                            <>
+                              <Download className="h-4 w-4" />
+                              PDF Olarak İndir
+                            </>
+                          )}
+                        </button>
+                      </div>
                     </div>
+
+                    {reportsPdfError && (
+                      <div className="mb-5 rounded-xl border border-rose-200 bg-rose-50 px-4 py-2.5 text-xs font-medium text-rose-700 flex items-center justify-between gap-3">
+                        <span>{reportsPdfError}</span>
+                        <button
+                          type="button"
+                          onClick={() => setReportsPdfError(null)}
+                          className="text-rose-500 hover:text-rose-800 cursor-pointer"
+                        >
+                          <X className="h-4 w-4" />
+                        </button>
+                      </div>
+                    )}
 
                     {/* KPI Grid */}
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-5 mb-8">
@@ -8128,20 +8367,19 @@ export default function DofAdmin({ onNavigate }: DofAdminProps = {}) {
                         </div>
 
                         <div className="flex flex-col items-center gap-3 bg-slate-50/50 p-4 rounded-xl border border-slate-100">
-                          <img
-                            referrerPolicy="no-referrer"
-                            src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(customHostUrl + "?view=submit")}`}
+                          <QrCodeImage
+                            value={customHostUrl + "?view=submit"}
+                            size={200}
                             alt="Personel Form QR"
                             className="w-40 h-40 bg-white p-2 rounded-lg border border-slate-100 shadow-xs animate-none"
                           />
-                          <a
-                            href={`https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=${encodeURIComponent(customHostUrl + "?view=submit")}`}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="inline-flex items-center gap-1.5 py-1 px-2.5 bg-blue-600 hover:bg-blue-700 text-white text-[10px] font-bold rounded-lg transition"
+                          <button
+                            type="button"
+                            onClick={() => void downloadQrPng(customHostUrl + "?view=submit", "personel-bildirim-qr.png", 600)}
+                            className="inline-flex items-center gap-1.5 py-1 px-2.5 bg-blue-600 hover:bg-blue-700 text-white text-[10px] font-bold rounded-lg transition cursor-pointer"
                           >
                             <Download className="h-3 w-3" /> QR Kodunu Büyük İndir
-                          </a>
+                          </button>
                         </div>
 
                         <div className="space-y-1">
@@ -8184,20 +8422,19 @@ export default function DofAdmin({ onNavigate }: DofAdminProps = {}) {
                         </div>
 
                         <div className="flex flex-col items-center gap-3 bg-slate-50/50 p-4 rounded-xl border border-slate-100">
-                          <img
-                            referrerPolicy="no-referrer"
-                            src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(customHostUrl)}`}
+                          <QrCodeImage
+                            value={customHostUrl}
+                            size={200}
                             alt="Yönetim Panel QR"
                             className="w-40 h-40 bg-white p-2 rounded-lg border border-slate-100 shadow-xs animate-none"
                           />
-                          <a
-                            href={`https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=${encodeURIComponent(customHostUrl)}`}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="inline-flex items-center gap-1.5 py-1 px-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-[10px] font-bold rounded-lg transition"
+                          <button
+                            type="button"
+                            onClick={() => void downloadQrPng(customHostUrl, "yonetim-paneli-qr.png", 600)}
+                            className="inline-flex items-center gap-1.5 py-1 px-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-[10px] font-bold rounded-lg transition cursor-pointer"
                           >
                             <Download className="h-3 w-3" /> QR Kodunu Büyük İndir
-                          </a>
+                          </button>
                         </div>
 
                         <div className="space-y-1">
@@ -8318,6 +8555,7 @@ export default function DofAdmin({ onNavigate }: DofAdminProps = {}) {
                           <option value="all">Tümü</option>
                           <option value="düzeltici">Düzeltici</option>
                           <option value="önleyici">Önleyici</option>
+                          <option value="saha_tespiti">Saha Tespiti</option>
                         </select>
                       </div>
 
@@ -8426,7 +8664,7 @@ export default function DofAdmin({ onNavigate }: DofAdminProps = {}) {
                       <button
                         onClick={() => {
                           setSearchTerm("");
-                          setStatusFilter("acik");
+                          setStatusFilter("all");
                           setTypeFilter("all");
                           setDeptFilter("all");
                           setReferralFilter("all");
@@ -8528,6 +8766,22 @@ export default function DofAdmin({ onNavigate }: DofAdminProps = {}) {
                       ({preventiveDaysSetting} İş Günü Planlama)
                     </span>
                   </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setTypeFilter(typeFilter === "saha_tespiti" ? "all" : "saha_tespiti")}
+                    className={`min-h-[38px] px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer flex items-center gap-1.5 whitespace-nowrap shrink-0 tabular-nums ${
+                      typeFilter === "saha_tespiti"
+                        ? "bg-emerald-600 text-white shadow-md shadow-emerald-100"
+                        : "bg-white text-emerald-800 hover:bg-emerald-50 border border-emerald-200"
+                    }`}
+                  >
+                    <MapPin className="h-3.5 w-3.5 shrink-0" />
+                    <span>Saha Tespiti</span>
+                    <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono ${typeFilter === "saha_tespiti" ? "bg-emerald-800 text-white" : "bg-emerald-100 text-emerald-800"}`}>
+                      {fieldInspectionCount}
+                    </span>
+                  </button>
                 </div>
               </div>
 
@@ -8553,13 +8807,39 @@ export default function DofAdmin({ onNavigate }: DofAdminProps = {}) {
                     type="button"
                     onClick={() => setStatusFilter(statusFilter === "acik" ? "all" : "acik")}
                     className={`min-h-[36px] px-2.5 py-1 rounded-lg text-xs font-bold transition cursor-pointer flex items-center gap-1 whitespace-nowrap shrink-0 tabular-nums ${
-                      statusFilter === "acik"
+                      statusFilter === "acik" || statusFilter === "bekleyen"
                         ? "bg-amber-600 text-white"
                         : "bg-white text-amber-800 hover:bg-amber-50 border border-amber-200"
                     }`}
                   >
                     <span>Açık & İşlemde</span>
                     <span className="text-[10px] font-mono opacity-80">({openCount})</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setStatusFilter(statusFilter === "yeni" ? "all" : "yeni")}
+                    className={`min-h-[36px] px-2.5 py-1 rounded-lg text-xs font-bold transition cursor-pointer flex items-center gap-1 whitespace-nowrap shrink-0 tabular-nums ${
+                      statusFilter === "yeni"
+                        ? "bg-blue-600 text-white shadow-xs"
+                        : "bg-white text-blue-800 hover:bg-blue-50 border border-blue-200"
+                    }`}
+                  >
+                    <span>Yeni Başvuru</span>
+                    <span className="text-[10px] font-mono opacity-80">({newCount})</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setStatusFilter(statusFilter === "inceleniyor" ? "all" : "inceleniyor")}
+                    className={`min-h-[36px] px-2.5 py-1 rounded-lg text-xs font-bold transition cursor-pointer flex items-center gap-1 whitespace-nowrap shrink-0 tabular-nums ${
+                      statusFilter === "inceleniyor"
+                        ? "bg-indigo-600 text-white shadow-xs"
+                        : "bg-white text-indigo-800 hover:bg-indigo-50 border border-indigo-200"
+                    }`}
+                  >
+                    <span>İnceleniyor</span>
+                    <span className="text-[10px] font-mono opacity-80">({reviewCount})</span>
                   </button>
 
                   <button
@@ -8757,9 +9037,14 @@ export default function DofAdmin({ onNavigate }: DofAdminProps = {}) {
                   type="button"
                   onClick={() => {
                     setTypeFilter("all");
-                    setStatusFilter("acik");
+                    setStatusFilter("all");
                     setSearchTerm("");
                     setDeptFilter("all");
+                    setReferralFilter("all");
+                    setFolderFilter("all");
+                    setDateRangePreset("all");
+                    setDateStart("");
+                    setDateEnd("");
                   }}
                   className="inline-flex items-center gap-1 px-3 py-1.5 bg-indigo-50 text-indigo-700 font-bold rounded-lg text-xs hover:bg-indigo-100 transition cursor-pointer"
                 >
@@ -8821,7 +9106,10 @@ export default function DofAdmin({ onNavigate }: DofAdminProps = {}) {
                               )}
                             </div>
 
-                            <h4 className="text-sm font-bold text-slate-900 leading-snug line-clamp-2">
+                            <h4
+                              title={dof.title}
+                              className="text-sm font-bold text-slate-900 leading-snug line-clamp-2"
+                            >
                               {dof.title}
                             </h4>
 
@@ -9002,10 +9290,30 @@ export default function DofAdmin({ onNavigate }: DofAdminProps = {}) {
                           </td>
 
                           {/* Döf Başvuru */}
-                          <td className="p-4">
+                          <td className="p-4 relative group/dof" title={dof.title}>
                             <div className="flex flex-col gap-1">
                               <span className="font-mono text-[10px] font-bold text-indigo-600">{dof.refNo}</span>
                               <span className="font-semibold text-slate-900 line-clamp-1">{dof.title}</span>
+                            </div>
+
+                            {/* Hover Tooltip: DÖF Başvuru Konusu */}
+                            <div className="pointer-events-none opacity-0 invisible group-hover/dof:opacity-100 group-hover/dof:visible transition-opacity duration-150 absolute left-4 top-full mt-1 z-40 w-80 bg-slate-900 text-white rounded-xl p-3 shadow-xl border border-slate-700">
+                              <span className="text-[10px] font-bold uppercase tracking-wider text-indigo-300 block mb-1">
+                                DÖF Başvuru Konusu
+                              </span>
+                              <p className="text-xs font-bold text-white leading-snug">
+                                {dof.title}
+                              </p>
+                              {dof.location && (
+                                <p className="text-[11px] text-emerald-300 mt-1 font-medium">
+                                  Saha: {dof.location}
+                                </p>
+                              )}
+                              {dof.description && (
+                                <p className="text-[11px] text-slate-300 mt-1.5 line-clamp-3 leading-relaxed">
+                                  {dof.description}
+                                </p>
+                              )}
                             </div>
                           </td>
 
@@ -9036,29 +9344,37 @@ export default function DofAdmin({ onNavigate }: DofAdminProps = {}) {
                             </div>
                           </td>
 
-                          {/* Faaliyet Türü (Düzeltici vs Önleyici Ayrımı) */}
+                          {/* Faaliyet Türü (Düzeltici vs Önleyici & Saha Tespiti Ayrımı) */}
                           <td className="p-4">
-                            {dof.type === "düzeltici" ? (
-                              <div className="flex flex-col gap-0.5 items-start">
-                                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-indigo-50 border border-indigo-200/80 text-indigo-700 font-extrabold text-[10px] uppercase tracking-wide shadow-2xs">
-                                  <Wrench className="h-3 w-3 text-indigo-600" />
-                                  Düzeltici Faaliyet
+                            <div className="flex flex-col gap-1 items-start">
+                              {dof.type === "düzeltici" ? (
+                                <div className="flex flex-col gap-0.5 items-start">
+                                  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-indigo-50 border border-indigo-200/80 text-indigo-700 font-extrabold text-[10px] uppercase tracking-wide shadow-2xs">
+                                    <Wrench className="h-3 w-3 text-indigo-600" />
+                                    Düzeltici Faaliyet
+                                  </span>
+                                  <span className="text-[9px] text-slate-500 font-semibold pl-1">
+                                    Plan: {correctiveDaysSetting} İş Günü
+                                  </span>
+                                </div>
+                              ) : (
+                                <div className="flex flex-col gap-0.5 items-start">
+                                  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-teal-50 border border-teal-200/80 text-teal-800 font-extrabold text-[10px] uppercase tracking-wide shadow-2xs">
+                                    <ShieldCheck className="h-3 w-3 text-teal-600" />
+                                    Önleyici Faaliyet
+                                  </span>
+                                  <span className="text-[9px] text-slate-500 font-semibold pl-1">
+                                    Plan: {preventiveDaysSetting} İş Günü
+                                  </span>
+                                </div>
+                              )}
+                              {isFieldInspectorDof(dof) && (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-50 border border-emerald-200 text-emerald-800 font-bold text-[10px]">
+                                  <MapPin className="h-2.5 w-2.5 text-emerald-600" />
+                                  Saha Tesbiti
                                 </span>
-                                <span className="text-[9px] text-slate-500 font-semibold pl-1">
-                                  Plan: {correctiveDaysSetting} İş Günü
-                                </span>
-                              </div>
-                            ) : (
-                              <div className="flex flex-col gap-0.5 items-start">
-                                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-teal-50 border border-teal-200/80 text-teal-800 font-extrabold text-[10px] uppercase tracking-wide shadow-2xs">
-                                  <ShieldCheck className="h-3 w-3 text-teal-600" />
-                                  Önleyici Faaliyet
-                                </span>
-                                <span className="text-[9px] text-slate-500 font-semibold pl-1">
-                                  Plan: {preventiveDaysSetting} İş Günü
-                                </span>
-                              </div>
-                            )}
+                              )}
+                            </div>
                           </td>
 
                           {/* Durumu & Kapanış Bilgisi */}
@@ -10362,16 +10678,22 @@ export default function DofAdmin({ onNavigate }: DofAdminProps = {}) {
               <div className="flex flex-col gap-3 pb-4 border-b border-slate-100 mb-4 shrink-0">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2.5">
-                    <span className="p-2 rounded-xl bg-indigo-50 text-indigo-600">
+                    <span className={`p-2 rounded-xl ${settingsModalTab === "cleanup" ? "bg-rose-50 text-rose-600" : "bg-indigo-50 text-indigo-600"}`}>
                       {settingsModalTab === "database" ? (
                         <Database className="h-5 w-5 text-indigo-600" />
+                      ) : settingsModalTab === "cleanup" ? (
+                        <Trash2 className="h-5 w-5 text-rose-600" />
                       ) : (
                         <Settings className="h-5 w-5 text-indigo-600" />
                       )}
                     </span>
                     <div>
                       <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
-                        {settingsModalTab === "database" ? "Veritabanı & Tablo Mimarisi" : "Sistem & Parametre Ayarları"}
+                        {settingsModalTab === "database"
+                          ? "Veritabanı & Tablo Mimarisi"
+                          : settingsModalTab === "cleanup"
+                          ? "Tanımlı Verileri Silme"
+                          : "Sistem & Parametre Ayarları"}
                         {settingsModalTab === "database" && (
                           <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
                             <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
@@ -10382,6 +10704,8 @@ export default function DofAdmin({ onNavigate }: DofAdminProps = {}) {
                       <p className="text-[11px] text-slate-400 font-medium">
                         {settingsModalTab === "database"
                           ? "Google Cloud Firestore veritabanı bağlantı detayları, canlı koleksiyon kayıtları ve şemalar"
+                          : settingsModalTab === "cleanup"
+                          ? "Yöneticiye özel seçmeli veri silme ve sıfırlama aracı (Admin hesapları korunur)"
                           : (isSystemAdmin || activeRolePerms.canManageKvkkAndVersion)
                           ? "Yönetici Paneli, termin süreleri ve DÖF davranış parametreleri"
                           : "Termin süreleri, bildirim ve panel tercih parametreleri"}
@@ -10398,11 +10722,11 @@ export default function DofAdmin({ onNavigate }: DofAdminProps = {}) {
                 </div>
 
                 {/* Tab Switcher */}
-                <div className="flex items-center gap-2 p-1 bg-slate-100/90 rounded-2xl w-full sm:w-auto self-start border border-slate-200/60">
+                <div className="flex flex-wrap items-center gap-1.5 p-1 bg-slate-100/90 rounded-2xl w-full sm:w-auto self-start border border-slate-200/60">
                   <button
                     type="button"
                     onClick={() => setSettingsModalTab("parameters")}
-                    className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer ${
+                    className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer whitespace-nowrap shrink-0 ${
                       settingsModalTab === "parameters"
                         ? "bg-white text-indigo-700 shadow-xs"
                         : "text-slate-600 hover:text-slate-900 hover:bg-slate-200/50"
@@ -10415,7 +10739,7 @@ export default function DofAdmin({ onNavigate }: DofAdminProps = {}) {
                     <button
                       type="button"
                       onClick={() => setSettingsModalTab("database")}
-                      className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer ${
+                      className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer whitespace-nowrap shrink-0 ${
                         settingsModalTab === "database"
                           ? "bg-indigo-600 text-white shadow-xs"
                           : "text-slate-600 hover:text-slate-900 hover:bg-slate-200/50"
@@ -10426,6 +10750,20 @@ export default function DofAdmin({ onNavigate }: DofAdminProps = {}) {
                       <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-extrabold ${settingsModalTab === "database" ? "bg-white/20 text-white" : "bg-emerald-100 text-emerald-800"}`}>
                         7 Tablo
                       </span>
+                    </button>
+                  )}
+                  {isSystemAdmin && (
+                    <button
+                      type="button"
+                      onClick={() => setSettingsModalTab("cleanup")}
+                      className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer whitespace-nowrap shrink-0 ${
+                        settingsModalTab === "cleanup"
+                          ? "bg-rose-600 text-white shadow-xs"
+                          : "text-rose-700 hover:text-rose-900 hover:bg-rose-100/70"
+                      }`}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                      <span>Veri Silme</span>
                     </button>
                   )}
                 </div>
@@ -10447,9 +10785,207 @@ export default function DofAdmin({ onNavigate }: DofAdminProps = {}) {
                     }}
                   />
                 </div>
+              ) : settingsModalTab === "cleanup" && isSystemAdmin ? (
+                <div className="overflow-y-auto pr-1 flex-1 py-1">
+                  <div className="space-y-3 bg-white border border-rose-200 rounded-2xl p-4">
+                    <div className="flex flex-wrap items-center justify-between gap-2 pb-2.5 border-b border-rose-100">
+                      <div className="flex items-center gap-2">
+                        <span className="p-1.5 rounded-lg bg-rose-600 text-white shrink-0">
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </span>
+                        <div>
+                          <h4 className="text-xs font-bold text-slate-900">
+                            Tanımlı Verileri Seçerek Silme (Sadece Admin)
+                          </h4>
+                          <p className="text-[11px] text-slate-500">
+                            Silmek istediğiniz veri gruplarını işaretleyin. Admin hesapları korunur.
+                          </p>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleToggleAllDeleteKeys}
+                        disabled={isBulkDeleting}
+                        className="px-2.5 py-1.5 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 text-[11px] font-semibold text-slate-700 transition cursor-pointer whitespace-nowrap shrink-0"
+                      >
+                        {selectedDeleteKeysCount === 8 ? "Seçimi Temizle" : "Tümünü Seç"}
+                      </button>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      {[
+                        {
+                          key: "dofs" as const,
+                          label: "DÖF Kayıtları",
+                          hint: "Tüm DÖF başvuruları ve geçmişi",
+                          countLabel: `${dofs.length} kayıt`,
+                        },
+                        {
+                          key: "users" as const,
+                          label: "Kullanıcılar (Admin hariç)",
+                          hint: "Yönetici hesapları silinmez",
+                          countLabel: `${nonAdminUsersCount} kişi`,
+                        },
+                        {
+                          key: "departments" as const,
+                          label: "Birimler",
+                          hint: "Tanımlı tüm birim ve sorumlular",
+                          countLabel: `${departments.length} birim`,
+                        },
+                        {
+                          key: "folders" as const,
+                          label: "Klasörler",
+                          hint: "Arşiv klasör tanımları",
+                          countLabel: `${folders.length} klasör`,
+                        },
+                        {
+                          key: "emailLogs" as const,
+                          label: "Bildirim & E-posta Logları",
+                          hint: "Gönderim ve işlem günlükleri",
+                          countLabel: `${emailLogs.length} log`,
+                        },
+                        {
+                          key: "passwordRequests" as const,
+                          label: "Şifre Talepleri",
+                          hint: "Bekleyen ve geçmiş talepler",
+                          countLabel: `${passwordRequests.length} talep`,
+                        },
+                        {
+                          key: "accessRoles" as const,
+                          label: "Özel Erişim Rolleri",
+                          hint: "Özel roller silinir, 3 temel rol sıfırlanır",
+                          countLabel: `${customRolesCount} özel rol`,
+                        },
+                        {
+                          key: "systemSettings" as const,
+                          label: "Sistem & Parametre Ayarları",
+                          hint: "Termin, KVKK, ses ve düzen ayarlarını sıfırlar",
+                          countLabel: "Varsayılan",
+                        },
+                      ].map((item) => {
+                        const checked = Boolean(deleteSelection[item.key]);
+                        return (
+                          <label
+                            key={item.key}
+                            className={`flex items-start justify-between gap-2.5 min-h-[44px] p-2.5 rounded-xl border transition cursor-pointer select-none ${
+                              checked
+                                ? "border-rose-300 bg-rose-50/70"
+                                : "border-slate-200 bg-slate-50/50 hover:bg-slate-50"
+                            }`}
+                          >
+                            <div className="flex items-start gap-2.5 min-w-0">
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                disabled={isBulkDeleting}
+                                onChange={() => handleToggleDeleteKey(item.key)}
+                                className="mt-0.5 h-4 w-4 rounded border-slate-300 text-rose-600 focus:ring-rose-500 cursor-pointer shrink-0"
+                              />
+                              <div className="min-w-0">
+                                <span className="text-xs font-semibold text-slate-800 block leading-snug">
+                                  {item.label}
+                                </span>
+                                <span className="text-[10px] text-slate-500 block leading-snug">
+                                  {item.hint}
+                                </span>
+                              </div>
+                            </div>
+                            <span className="text-[11px] font-mono tabular-nums font-semibold text-slate-600 shrink-0 pt-0.5">
+                              {item.countLabel}
+                            </span>
+                          </label>
+                        );
+                      })}
+                    </div>
+
+                    {bulkDeleteMessage && (
+                      <div
+                        className={`p-2.5 rounded-xl border text-xs font-medium flex items-center gap-2 ${
+                          bulkDeleteMessage.type === "success"
+                            ? "bg-emerald-50 border-emerald-200 text-emerald-800"
+                            : "bg-rose-50 border-rose-200 text-rose-800"
+                        }`}
+                      >
+                        {bulkDeleteMessage.type === "success" ? (
+                          <CheckCircle className="h-4 w-4 text-emerald-600 shrink-0" />
+                        ) : (
+                          <AlertTriangle className="h-4 w-4 text-rose-600 shrink-0" />
+                        )}
+                        <span>{bulkDeleteMessage.text}</span>
+                      </div>
+                    )}
+
+                    {!isDeleteConfirmOpen ? (
+                      <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+                        <span className="text-[11px] text-slate-500 tabular-nums">
+                          {selectedDeleteKeysCount > 0
+                            ? `${selectedDeleteKeysCount} veri grubu seçildi`
+                            : "Silme işlemi için en az 1 grup işaretleyin"}
+                        </span>
+                        <button
+                          type="button"
+                          disabled={selectedDeleteKeysCount === 0 || isBulkDeleting}
+                          onClick={() => {
+                            setIsDeleteConfirmChecked(false);
+                            setBulkDeleteMessage(null);
+                            setIsDeleteConfirmOpen(true);
+                          }}
+                          className="inline-flex items-center gap-1.5 min-h-[40px] px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 disabled:bg-slate-200 disabled:text-slate-400 text-white text-xs font-bold transition cursor-pointer disabled:cursor-not-allowed whitespace-nowrap shrink-0"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                          <span>Seçili Verileri Sil</span>
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="p-3 rounded-xl border border-rose-300 bg-rose-50 space-y-2.5">
+                        <div className="flex items-start gap-2 text-xs text-rose-900">
+                          <AlertTriangle className="h-4 w-4 text-rose-600 shrink-0 mt-0.5" />
+                          <p className="leading-snug font-medium">
+                            İşaretlediğiniz <strong>{selectedDeleteKeysCount}</strong> veri grubu veritabanından kalıcı olarak silinecektir. Bu işlem geri alınamaz.
+                          </p>
+                        </div>
+                        <label className="flex items-center gap-2 min-h-[36px] cursor-pointer select-none">
+                          <input
+                            type="checkbox"
+                            checked={isDeleteConfirmChecked}
+                            disabled={isBulkDeleting}
+                            onChange={(e) => setIsDeleteConfirmChecked(e.target.checked)}
+                            className="h-4 w-4 rounded border-rose-300 text-rose-600 focus:ring-rose-500 cursor-pointer"
+                          />
+                          <span className="text-xs font-semibold text-rose-950">
+                            Kalıcı silme işlemini onaylıyorum
+                          </span>
+                        </label>
+                        <div className="flex items-center justify-end gap-2">
+                          <button
+                            type="button"
+                            disabled={isBulkDeleting}
+                            onClick={() => {
+                              setIsDeleteConfirmOpen(false);
+                              setIsDeleteConfirmChecked(false);
+                            }}
+                            className="min-h-[40px] px-3.5 py-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold transition cursor-pointer"
+                          >
+                            Vazgeç
+                          </button>
+                          <button
+                            type="button"
+                            disabled={!isDeleteConfirmChecked || isBulkDeleting}
+                            onClick={handleExecuteBulkDelete}
+                            className="inline-flex items-center gap-1.5 min-h-[40px] px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 disabled:bg-rose-300 text-white text-xs font-bold transition cursor-pointer disabled:cursor-not-allowed whitespace-nowrap shrink-0"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                            <span>{isBulkDeleting ? "Siliniyor..." : "Kalıcı Olarak Sil"}</span>
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
               ) : (
                 <div className="space-y-4 overflow-y-auto pr-1 flex-1">
-                {/* 0. DÖF Varsayılan Planlama Süreleri (Termin / İş Günü Ayarları) */}
+                {/* 0. DÖF Varsayılan Planlama Süreleri (Sadece Admin) */}
+                {isSystemAdmin && (
                 <div className="bg-gradient-to-br from-amber-50/70 via-indigo-50/30 to-white border border-amber-200/80 rounded-2xl p-4 space-y-3 shadow-2xs">
                   <div className="flex items-center justify-between border-b border-amber-200/50 pb-2">
                     <div className="flex items-center gap-2">
@@ -10467,32 +11003,6 @@ export default function DofAdmin({ onNavigate }: DofAdminProps = {}) {
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    {/* Önleyici Faaliyet Süresi */}
-                    <div className="space-y-1 bg-white p-3 rounded-xl border border-slate-200 focus-within:border-indigo-500 focus-within:ring-1 focus-within:ring-indigo-500/20 transition">
-                      <div className="flex items-center justify-between">
-                        <label className="text-[10px] font-bold text-slate-700 block">
-                          Önleyici Faaliyet
-                        </label>
-                        <span className="text-[9px] font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded">
-                          Varsayılan: 7
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <input
-                          type="number"
-                          min="1"
-                          max="365"
-                          value={preventiveDaysSetting}
-                          onChange={(e) => setPreventiveDaysSetting(Math.max(1, Number(e.target.value) || 1))}
-                          className="w-full bg-slate-50 focus:bg-white border border-slate-200 focus:border-indigo-500 rounded-lg px-2.5 py-1.5 text-xs font-bold text-slate-800 outline-none transition"
-                        />
-                        <span className="text-xs font-semibold text-slate-500 shrink-0">İş Günü</span>
-                      </div>
-                      <p className="text-[9px] text-slate-400 leading-tight">
-                        Önleyici DÖF açıldığında otomatik hesaplanan termin süresi.
-                      </p>
-                    </div>
-
                     {/* Düzenleyici / Düzeltici Faaliyet Süresi */}
                     <div className="space-y-1 bg-white p-3 rounded-xl border border-slate-200 focus-within:border-indigo-500 focus-within:ring-1 focus-within:ring-indigo-500/20 transition">
                       <div className="flex items-center justify-between">
@@ -10518,6 +11028,32 @@ export default function DofAdmin({ onNavigate }: DofAdminProps = {}) {
                         Düzeltici DÖF açıldığında otomatik hesaplanan termin süresi.
                       </p>
                     </div>
+
+                    {/* Önleyici Faaliyet Süresi */}
+                    <div className="space-y-1 bg-white p-3 rounded-xl border border-slate-200 focus-within:border-indigo-500 focus-within:ring-1 focus-within:ring-indigo-500/20 transition">
+                      <div className="flex items-center justify-between">
+                        <label className="text-[10px] font-bold text-slate-700 block">
+                          Önleyici Faaliyet
+                        </label>
+                        <span className="text-[9px] font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded">
+                          Varsayılan: 7
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="number"
+                          min="1"
+                          max="365"
+                          value={preventiveDaysSetting}
+                          onChange={(e) => setPreventiveDaysSetting(Math.max(1, Number(e.target.value) || 1))}
+                          className="w-full bg-slate-50 focus:bg-white border border-slate-200 focus:border-indigo-500 rounded-lg px-2.5 py-1.5 text-xs font-bold text-slate-800 outline-none transition"
+                        />
+                        <span className="text-xs font-semibold text-slate-500 shrink-0">İş Günü</span>
+                      </div>
+                      <p className="text-[9px] text-slate-400 leading-tight">
+                        Önleyici DÖF açıldığında otomatik hesaplanan termin süresi.
+                      </p>
+                    </div>
                   </div>
 
                   {/* Canlı Önizleme Kutusu */}
@@ -10526,15 +11062,15 @@ export default function DofAdmin({ onNavigate }: DofAdminProps = {}) {
                       <Calendar className="h-3 w-3 text-slate-500" /> Bugün Oluşturulan DÖF Termin Önizlemesi:
                     </div>
                     <div className="flex items-center justify-between text-slate-500">
-                      <span>• Önleyici Faaliyet ({preventiveDaysSetting} İş Günü):</span>
-                      <span className="font-mono font-bold text-indigo-700">
-                        {computeTargetCompletionDate(new Date(), "önleyici", preventiveDaysSetting)}
+                      <span>• Düzenleyici / Düzeltici ({correctiveDaysSetting} İş Günü):</span>
+                      <span className="font-mono font-bold text-amber-700">
+                        {computeTargetCompletionDate(new Date(), "düzeltici", correctiveDaysSetting)}
                       </span>
                     </div>
                     <div className="flex items-center justify-between text-slate-500">
-                      <span>• Düzenleyici Faaliyet ({correctiveDaysSetting} İş Günü):</span>
-                      <span className="font-mono font-bold text-amber-700">
-                        {computeTargetCompletionDate(new Date(), "düzeltici", correctiveDaysSetting)}
+                      <span>• Önleyici Faaliyet ({preventiveDaysSetting} İş Günü):</span>
+                      <span className="font-mono font-bold text-indigo-700">
+                        {computeTargetCompletionDate(new Date(), "önleyici", preventiveDaysSetting)}
                       </span>
                     </div>
                     <p className="text-[9px] text-slate-400 italic pt-0.5">
@@ -10542,6 +11078,7 @@ export default function DofAdmin({ onNavigate }: DofAdminProps = {}) {
                     </p>
                   </div>
                 </div>
+                )}
 
                 {/* 1. Default Sound Setting */}
                 <div className="space-y-1.5">
@@ -10606,11 +11143,19 @@ export default function DofAdmin({ onNavigate }: DofAdminProps = {}) {
                     {activeRolePerms.canViewDofs && <option value="dofs">DÖF Başvuruları</option>}
                     {activeRolePerms.canManageFolders && <option value="folders">Klasör Yönetimi</option>}
                     {activeRolePerms.canCreateDof && <option value="new_dof">Yeni DÖF Oluşturma</option>}
+                    {(isSystemAdmin || activeRolePerms.canCreateDof || activeRolePerms.canViewDofs) && (
+                      <option value="field_capture">Sahada Hızlı Tespit</option>
+                    )}
+                    {(isSystemAdmin || activeRolePerms.canViewReports || activeRolePerms.canViewDofs) && (
+                      <option value="audit_report">Denetim & Raporlama</option>
+                    )}
                     {activeRolePerms.canViewReports && <option value="reports">Raporlar & Analiz</option>}
                     {(isSystemAdmin || activeRolePerms.canManageSystemAdmin) && (
                       <>
                         <option value="users">Yönetici & Kullanıcı Yönetimi</option>
                         <option value="roles">Erişim Rolleri</option>
+                        <option value="departments">Birimler</option>
+                        <option value="logs">Sistem Logları</option>
                         <option value="remote">Uzak Bağlantı & Paylaşım</option>
                       </>
                     )}
@@ -10786,7 +11331,7 @@ export default function DofAdmin({ onNavigate }: DofAdminProps = {}) {
                         disabled={isBulkDeleting}
                         className="px-2.5 py-1.5 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 text-[11px] font-semibold text-slate-700 transition cursor-pointer whitespace-nowrap shrink-0"
                       >
-                        {selectedDeleteKeysCount === 7 ? "Seçimi Temizle" : "Tümünü Seç"}
+                        {selectedDeleteKeysCount === 8 ? "Seçimi Temizle" : "Tümünü Seç"}
                       </button>
                     </div>
 
@@ -10833,6 +11378,12 @@ export default function DofAdmin({ onNavigate }: DofAdminProps = {}) {
                           label: "Özel Erişim Rolleri",
                           hint: "Özel roller silinir, 3 temel rol sıfırlanır",
                           countLabel: `${customRolesCount} özel rol`,
+                        },
+                        {
+                          key: "systemSettings" as const,
+                          label: "Sistem & Parametre Ayarları",
+                          hint: "Termin, KVKK, ses ve düzen ayarlarını sıfırlar",
+                          countLabel: "Varsayılan",
                         },
                       ].map((item) => {
                         const checked = Boolean(deleteSelection[item.key]);
@@ -10985,6 +11536,29 @@ export default function DofAdmin({ onNavigate }: DofAdminProps = {}) {
                     </button>
                   </div>
                 </div>
+              ) : settingsModalTab === "cleanup" && isSystemAdmin ? (
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between pt-4 border-t border-slate-100 mt-4 gap-3 shrink-0">
+                  <span className="text-xs text-slate-500 font-medium">
+                    Yalnızca işaretlenen veri grupları silinir; admin hesapları korunur.
+                  </span>
+                  <div className="flex items-center gap-2 self-end sm:self-auto">
+                    <button
+                      type="button"
+                      onClick={() => setSettingsModalTab("parameters")}
+                      className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-xl transition cursor-pointer"
+                    >
+                      <SlidersHorizontal className="h-3.5 w-3.5 text-slate-500" />
+                      <span>Parametre Ayarlarına Geç</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setIsSettingsOpen(false)}
+                      className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl shadow-xs transition cursor-pointer"
+                    >
+                      Pencereyi Kapat
+                    </button>
+                  </div>
+                </div>
               ) : (
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between pt-4 border-t border-slate-100 mt-4 gap-3 shrink-0">
                   <div className="flex items-center gap-2">
@@ -11007,6 +11581,8 @@ export default function DofAdmin({ onNavigate }: DofAdminProps = {}) {
                             setDefaultSoundSetting("on");
                             setDefaultTabSetting("dofs");
                             setDefaultStatusFilterSetting("acik");
+                            setStatusFilterState("acik");
+                            hasManualStatusFilterRef.current = false;
                             setDefaultNotificationSetting("on");
                             setIsPasscodeLoginPassive(false);
                             setIsKvkkMaskingEnabled(false);
@@ -11053,13 +11629,15 @@ export default function DofAdmin({ onNavigate }: DofAdminProps = {}) {
                         const ver = appVersionSetting.trim() || DEFAULT_APP_VERSION;
 
                         const payload: Record<string, any> = {
-                          preventiveActionDays: prev,
-                          correctiveActionDays: corr,
                           defaultSoundSetting: defaultSoundSetting as any,
                           defaultTabSetting,
                           defaultStatusFilterSetting,
                           defaultNotificationSetting: defaultNotificationSetting as any,
                         };
+                        if (isSystemAdmin) {
+                          payload.preventiveActionDays = prev;
+                          payload.correctiveActionDays = corr;
+                        }
                         if (canManageAdminSettings) {
                           payload.isPasscodeLoginPassive = isPasscodeLoginPassive;
                         }
@@ -11072,6 +11650,8 @@ export default function DofAdmin({ onNavigate }: DofAdminProps = {}) {
                         await saveSystemSettings(payload);
                         
                         // Apply immediately
+                        setStatusFilterState(defaultStatusFilterSetting);
+                        hasManualStatusFilterRef.current = false;
                         if (defaultSoundSetting === "on") {
                           setIsMuted(false);
                         } else if (defaultSoundSetting === "off") {
@@ -11203,12 +11783,14 @@ export default function DofAdmin({ onNavigate }: DofAdminProps = {}) {
               {/* QR Code Container */}
               <div className="flex flex-col items-center justify-center space-y-4">
                 <div className="p-5 bg-slate-50 border-4 border-emerald-600 rounded-[32px] inline-block shadow-inner relative">
-                  <img
-                    src={`https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(
+                  <QrCodeImage
+                    value={
                       activePosterDept.isCustomQr 
                         ? `${window.location.origin}?view=submit&dept=${encodeURIComponent(activePosterDept.name)}`
                         : `${window.location.origin}?view=submit`
-                    )}&color=059669`}
+                    }
+                    size={300}
+                    color="#059669"
                     alt="Birim DÖF QR"
                     className="w-60 h-60 object-contain rounded-2xl border border-white bg-white shadow-md"
                   />
@@ -11338,7 +11920,7 @@ export default function DofAdmin({ onNavigate }: DofAdminProps = {}) {
                     </div>
                     <div>
                       <span className="text-[10px] text-slate-400 uppercase font-bold block">Bildiren Kişi</span>
-                      <span className="font-semibold text-slate-800">{getMaskedReporterName(dofToReject.reporterName)}</span>
+                      <span className="font-semibold text-slate-800">{getMaskedReporterName(dofToReject.reporterName, dofToReject)}</span>
                     </div>
                   </div>
                 </div>
@@ -11397,7 +11979,8 @@ export default function DofAdmin({ onNavigate }: DofAdminProps = {}) {
 
       {/* Single DOF QR Code Modal */}
       <DofSingleQrModal 
-        dof={singleQrModalDof} 
+        dof={singleQrModalDof}
+        isOpen={Boolean(singleQrModalDof)}
         onClose={() => setSingleQrModalDof(null)} 
       />
 

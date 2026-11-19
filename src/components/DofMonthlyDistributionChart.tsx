@@ -1,6 +1,5 @@
 import React, { useState, useMemo } from "react";
 import {
-  ResponsiveContainer,
   ComposedChart,
   Area,
   Bar,
@@ -10,6 +9,7 @@ import {
   Tooltip,
   Legend,
 } from "recharts";
+import { SafeResponsiveContainer } from "./SafeResponsiveContainer";
 import {
   TrendingUp,
   TrendingDown,
@@ -426,7 +426,7 @@ export const DofMonthlyDistributionChart: React.FC<DofMonthlyDistributionChartPr
             </span>
           </div>
         ) : (
-          <ResponsiveContainer width="100%" height="100%">
+          <SafeResponsiveContainer>
             <ComposedChart data={chartData} margin={{ top: 15, right: 15, left: -20, bottom: 0 }}>
               <defs>
                 {/* Indigo Gradient */}
@@ -615,7 +615,7 @@ export const DofMonthlyDistributionChart: React.FC<DofMonthlyDistributionChartPr
                 </>
               )}
             </ComposedChart>
-          </ResponsiveContainer>
+          </SafeResponsiveContainer>
         )}
       </div>
 

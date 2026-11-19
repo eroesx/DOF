@@ -12,7 +12,8 @@ import {
   Camera,
   Smartphone,
   Settings,
-  Home
+  Home,
+  ClipboardCheck
 } from "lucide-react";
 import DofSubmitForm from "./components/DofSubmitForm";
 import DofTrack from "./components/DofTrack";
@@ -20,19 +21,20 @@ import DofAdmin from "./components/DofAdmin";
 import DofQrGenerator from "./components/DofQrGenerator";
 import DofMobileEditor from "./components/DofMobileEditor";
 import DofMobilePortal from "./components/DofMobilePortal";
+import FieldQuickCapture from "./components/FieldQuickCapture";
 import { DofQrScannerModal, ScanResult } from "./components/DofQrScannerModal";
 import { onAuthStateChanged } from "firebase/auth";
 import { auth, signOut } from "./firebase";
 import { getStoredAccessRoles, getRoleById } from "./lib/roles";
 
-type ViewTab = "portal" | "submit" | "track" | "admin" | "qr" | "edit";
+type ViewTab = "portal" | "submit" | "field-capture" | "track" | "admin" | "qr" | "edit";
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<ViewTab>(() => {
     if (typeof window !== "undefined") {
       const params = new URLSearchParams(window.location.search);
       const view = params.get("view");
-      if (view === "portal" || view === "submit" || view === "track" || view === "admin" || view === "qr" || view === "edit") {
+      if (view === "portal" || view === "submit" || view === "field-capture" || view === "track" || view === "admin" || view === "qr" || view === "edit") {
         return view as ViewTab;
       }
       if (params.get("mode") === "mobile" || window.innerWidth < 768) {
@@ -106,7 +108,7 @@ export default function App() {
     }, 1000);
 
     const handleNavEvent = (e: any) => {
-      if (e.detail && ["portal", "submit", "track", "admin", "qr", "edit"].includes(e.detail)) {
+      if (e.detail && ["portal", "submit", "field-capture", "track", "admin", "qr", "edit"].includes(e.detail)) {
         setActiveTab(e.detail as ViewTab);
       }
     };
@@ -205,6 +207,7 @@ export default function App() {
 
   const tabs = [
     { id: "admin", label: "Yönetim Paneli", icon: Lock },
+    { id: "field-capture", label: "Saha Tespit", icon: ClipboardCheck },
     { id: "submit", label: "Form Doldur", icon: FileEdit },
     { id: "track", label: "Durum Takip", icon: Search },
     { id: "portal", label: "Mobil Giriş", icon: Home },
@@ -259,16 +262,18 @@ export default function App() {
                 })}
               </nav>
 
-              {/* QR Scanner Trigger Button */}
-              <button
-                onClick={() => setIsScannerModalOpen(true)}
-                className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white shadow-xs transition cursor-pointer"
-                id="header-scan-qr-btn"
-                title="Kamera ile DÖF QR Kodu Tara"
-              >
-                <Camera className="h-4 w-4" />
-                QR Kod Tara
-              </button>
+              {/* QR Scanner Trigger Button (Sadece Admin) */}
+              {isAdmin && (
+                <button
+                  onClick={() => setIsScannerModalOpen(true)}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white shadow-xs transition cursor-pointer"
+                  id="header-scan-qr-btn"
+                  title="DÖF QR Kodu Tara"
+                >
+                  <Camera className="h-4 w-4" />
+                  QR Kod Tara
+                </button>
+              )}
 
               {/* Ayarlar Button (Yönetici & Birim Sorumlusu) */}
               {canOpenSettings && (
@@ -429,6 +434,17 @@ export default function App() {
           )}
           {activeTab === "submit" && (
             <DofSubmitForm onGoToTrack={handleGoToTrack} onShowQr={handleShowQr} />
+          )}
+          {activeTab === "field-capture" && (
+            <FieldQuickCapture
+              onRequestLogin={() => setActiveTab("portal")}
+              onGoToAuditReport={() => {
+                setActiveTab("admin");
+                setTimeout(() => {
+                  window.dispatchEvent(new CustomEvent("dof_open_audit_report"));
+                }, 80);
+              }}
+            />
           )}
           {activeTab === "track" && (
             <DofTrack initialRefNo={initialTrackRef} />

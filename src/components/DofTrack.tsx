@@ -28,6 +28,7 @@ import { db } from "../firebase";
 import { DofForm, DofStatus } from "../types";
 import { DofSingleQrModal } from "./DofSingleQrModal";
 import { maskKvkkText } from "../lib/settings";
+import { isFieldInspectorDof } from "../lib/fieldClassification";
 import { exportDofPdf } from "../utils/dofPdfExporter";
 
 interface DofTrackProps {
@@ -388,9 +389,11 @@ export default function DofTrack({ initialRefNo }: DofTrackProps) {
                   <User className="h-4 w-4 text-slate-400 shrink-0" />
                   <div className="truncate">
                     <span className="text-[10px] text-slate-400 block uppercase font-semibold">BİLDİREN</span>
-                    <span className="font-medium text-slate-700">{maskKvkkText(dof.reporterName)}</span>
+                    <span className="font-medium text-slate-700">{maskKvkkText(dof.reporterName, false, "-", isFieldInspectorDof(dof))}</span>
                     {dof.reporterContact && (
-                      <span className="text-[10px] text-slate-400 block font-mono">{maskKvkkText(dof.reporterContact)}</span>
+                      <span className="text-[10px] text-slate-400 block font-mono">
+                        {maskKvkkText(dof.reporterContact, false, "-", isFieldInspectorDof(dof))}
+                      </span>
                     )}
                   </div>
                 </div>

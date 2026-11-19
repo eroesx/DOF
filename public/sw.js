@@ -61,10 +61,12 @@ self.addEventListener('fetch', (event) => {
           .catch(() => {});
         return cachedResponse;
       }
-      return fetch(event.request).catch(() => {
+      return fetch(event.request).catch(async () => {
         if (event.request.mode === 'navigate') {
-          return caches.match('/');
+          const cachedShell = await caches.match('/');
+          if (cachedShell) return cachedShell;
         }
+        return new Response('', { status: 503, statusText: 'Offline' });
       });
     })
   );

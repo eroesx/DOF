@@ -69,6 +69,8 @@ export const DofPieChart: React.FC<DofPieChartProps> = ({
   useEffect(() => {
     if (activeStatus && ["cozuldu", "yeni", "inceleniyor", "reddedildi"].includes(activeStatus)) {
       setSelectedStatus(activeStatus as StatusCategory);
+    } else {
+      setSelectedStatus(null);
     }
   }, [activeStatus]);
 
@@ -248,8 +250,10 @@ export const DofPieChart: React.FC<DofPieChartProps> = ({
     if (!selectedStatus || !dofs) return [];
 
     let list = dofs.filter((d) => {
-      const st = (d.status || "").toLowerCase();
-      if (selectedStatus === "cozuldu") return st === "cozuldu";
+      const st = (d.status || "").toLowerCase().trim();
+      if (selectedStatus === "cozuldu") {
+        return st === "cozuldu" || st === "çözüldü" || st === "tamamlandi" || st === "tamamlandı";
+      }
       if (selectedStatus === "yeni") return st === "yeni";
       if (selectedStatus === "inceleniyor") return st === "inceleniyor";
       if (selectedStatus === "reddedildi") return st === "reddedildi" || st === "iptal";

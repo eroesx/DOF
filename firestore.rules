@@ -51,7 +51,14 @@ service cloud.firestore {
         && (!data.keys().hasAny(['rootCauses']) || (data.rootCauses is list))
         && (!data.keys().hasAny(['comments']) || (data.comments is list))
         && (!data.keys().hasAny(['folderId']) || (data.folderId is string && data.folderId.size() <= 500))
-        && (!data.keys().hasAny(['folderName']) || (data.folderName is string && data.folderName.size() <= 1000));
+        && (!data.keys().hasAny(['folderName']) || (data.folderName is string && data.folderName.size() <= 1000))
+        && (!data.keys().hasAny(['location']) || (data.location is string && data.location.size() <= 1000))
+        && (!data.keys().hasAny(['severity']) || (data.severity is string && (data.severity == 'Düşük' || data.severity == 'Orta' || data.severity == 'Yüksek' || data.severity == 'Kritik')))
+        && (!data.keys().hasAny(['procedure']) || (data.procedure is string && data.procedure.size() <= 1000))
+        && (!data.keys().hasAny(['inspectionStatus']) || (data.inspectionStatus is string && data.inspectionStatus.size() <= 100))
+        && (!data.keys().hasAny(['closedAt']) || (data.closedAt is string && data.closedAt.size() <= 200))
+        && (!data.keys().hasAny(['dofSource']) || (data.dofSource is string && data.dofSource.size() <= 300))
+        && (!data.keys().hasAny(['isFieldInspector']) || (data.isFieldInspector is bool));
     }
 
     // Helper to validate a PanelUser
